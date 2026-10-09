@@ -1,0 +1,57 @@
+rules_version = '2';
+
+// =====================================================================
+//  ふたりスタジオ Firestore セキュリティルール
+//  ※ OWNER_EMAIL を、あなたのGoogleアカウントのメールアドレスに置き換えてから
+//    Firebaseコンソール → Firestore Database → ルール に貼り付けて「公開」してください
+// =====================================================================
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    function myEmail() {
+      return request.auth.token.email.lower();
+    }
+    function isOwner() {
+      return signedIn() && myEmail() == 'OWNER_EMAIL@gmail.com';
+    }
+    function isMember(sid) {
+      return isOwner() || (
+        signedIn()
+        && exists(/databases/$(database)/documents/studios/$(sid))
+        && myEmail() in get(/databases/$(database)/documents/studios/$(sid)).data.members
+      );
+    }
+
+    // スタジオ本体（メンバー一覧）：見るのはメンバー、作成・変更はオーナーだけ
+    match /studios/{sid} {
+      allow read: if isMember(sid);
+      allow create, update: if isOwner();
+      allow delete: if false;
+
+      // チャット：自分の名前でだけ送れる。消せるのは自分のメッセージだけ
+      match /chat/{id} {
+        allow read: if isMember(sid);
+        allow create: if isMember(sid) && request.resource.data.uid == request.auth.uid;
+        allow update: if false;
+        allow delete: if isMember(sid) && resource.data.uid == request.auth.uid;
+      }
+
+      // 既読位置：自分の分だけ書ける
+      match /reads/{uid} {
+        allow read: if isMember(sid);
+        allow write: if isMember(sid) && uid == request.auth.uid;
+      }
+
+      // 共有メモ・制作データ：メンバーなら誰でも編集できる
+      match /memos/{id} {
+        allow read, write: if isMember(sid);
+      }
+      match /state/{id} {
+        allow read, write: if isMember(sid);
+      }
+    }
+  }
+}

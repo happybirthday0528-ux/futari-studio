@@ -2,6 +2,7 @@
 //  app.js — ふたりスタジオの画面の動き
 // =====================================================================
 import { createStore, LS, newId } from './store.js';
+import { initMixer } from './stems.js';
 
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -290,6 +291,10 @@ $('#revAdd').addEventListener('submit', e => {
   saveShared('revs'); $('#revTxt').value = ''; renderRevs(); toast(fmt(ab.pos) + ' に修正指示を追加しました');
 });
 $('#stems').innerHTML = STEMS.map(([n, c, s], i) => `<tr><td><span class="dot" style="background:${c}"></span>${n}</td><td class="mono">夜明けのプリズム_${String(i + 1).padStart(2, '0')}_${n.replace(/ /g, '')}_128bpm.wav</td><td class="mono">3:48</td><td class="mono">48k / 24bit</td><td class="mono">${(62 + (i * 7) % 9).toFixed(0)} MB</td><td>${s === 'ok' ? '<span class="pill ok">受け渡し済</span>' : '<span class="pill wait">音が少ない・確認中</span>'}</td></tr>`).join('');
+// ステムミキサー（SUNOの一式を読み込んで、パートごとに再生）
+const mixer = initMixer({ root: $('#mixer'), toast, onPlay: () => players.forEach(p => p !== mixerPlayer && p.pause()) });
+const mixerPlayer = { pause: () => mixer.pause(), update: () => mixer.update() };
+players.push(mixerPlayer);
 $('#zipBtn').addEventListener('click', () => toast('ステムのアップロード・ダウンロードは、次の段階で使えるようになります'));
 
 /* ---------- 4 投稿 ---------- */
@@ -622,7 +627,8 @@ document.addEventListener('keydown', e => {
   }
   if (e.target.closest('input,textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
   const p = UI.tab === 'lab' ? lab : UI.tab === 'fin' ? ab : null;
-  if (e.code === 'Space' && p && !e.target.closest('button')) { e.preventDefault(); p.toggle(); }
+  if (e.code === 'Space' && UI.tab === 'fin' && mixer.loaded && !e.target.closest('button')) { e.preventDefault(); mixer.toggle(); }
+  else if (e.code === 'Space' && p && !e.target.closest('button')) { e.preventDefault(); p.toggle(); }
   else if (UI.tab === 'fin' && (e.key === 'a' || e.key === 'A')) ab.setTrack(0);
   else if (UI.tab === 'fin' && (e.key === 'b' || e.key === 'B')) ab.setTrack(1);
   else if (e.key === 'm' || e.key === 'M') { if (UI.tab === 'lab') { e.preventDefault(); $('#labCmt').focus(); } else if (UI.tab === 'fin') { e.preventDefault(); $('#revTxt').focus(); } }

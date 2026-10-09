@@ -52,6 +52,11 @@ service cloud.firestore {
       match /state/{id} {
         allow read, write: if isMember(sid);
       }
+
+      // 曲（アップロードした音源の情報・ミックスの状態・バランス案）
+      match /songs/{id} {
+        allow read, write: if isMember(sid);
+      }
     }
   }
 }

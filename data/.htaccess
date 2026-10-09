@@ -1,0 +1,8 @@
+# 音源の保存先：ブラウザから直接は開けないようにする（再生は api/file.php を通す）
+<IfModule mod_authz_core.c>
+  Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+  Order allow,deny
+  Deny from all
+</IfModule>

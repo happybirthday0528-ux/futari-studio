@@ -59,7 +59,13 @@ function localStore(seed) {
     },
     async deleteMemo(id) { D.memos = D.memos.filter(x => x.id !== id); persist(); emit('memos'); },
     onMembers() { return () => {}; },
-    async setMembers() {}
+    async setMembers() {},
+    // 曲のアップロードは本番モード（Firebase）のときだけ
+    async getIdToken() { return ''; },
+    onSongs(cb) { cb([]); return () => {}; },
+    async saveSong() { throw new Error('ローカルモードでは曲を保存できません'); },
+    async updateSong() {},
+    async deleteSong() {}
   };
 }
 
@@ -162,7 +168,27 @@ async function firebaseStore(cfg) {
     async deleteMemo(id) { await F.deleteDoc(F.doc(db, 'studios', SID, 'memos', id)); },
 
     onMembers(cb) { return keep(F.onSnapshot(root, s => cb(s.data() || {}))); },
-    async setMembers(list) { await F.updateDoc(root, { members: list }); }
+    async setMembers(list) { await F.updateDoc(root, { members: list }); },
+
+    // 曲（アップロードした音源の情報・ミックスの状態・バランス案）
+    async getIdToken() { return auth.currentUser ? auth.currentUser.getIdToken() : ''; },
+    onSongs(cb) {
+      const q = F.query(col('songs'), F.orderBy('createdAt', 'desc'));
+      return keep(F.onSnapshot(q, s => cb(s.docs.map(d => {
+        const v = d.data({ serverTimestamps: 'estimate' });
+        return { id: d.id, ...v, createdAt: ms(v.createdAt), updatedAt: ms(v.updatedAt), _local: d.metadata.hasPendingWrites };
+      }))));
+    },
+    async saveSong(id, data) {
+      await F.setDoc(F.doc(db, 'studios', SID, 'songs', id), {
+        ...data, createdAt: F.serverTimestamp(), updatedAt: F.serverTimestamp(),
+        createdBy: store.me.uid, createdByName: store.me.name, updatedBy: store.me.name
+      });
+    },
+    async updateSong(id, p) {
+      await F.updateDoc(F.doc(db, 'studios', SID, 'songs', id), { ...p, updatedAt: F.serverTimestamp(), updatedBy: store.me.name });
+    },
+    async deleteSong(id) { await F.deleteDoc(F.doc(db, 'studios', SID, 'songs', id)); }
   };
   return store;
 }

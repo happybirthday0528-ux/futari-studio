@@ -683,6 +683,7 @@ function start(st) {
     $('#chatWho').textContent = others ? `メンバー ${others + 1}人` : 'まだあなただけです（メンバー管理から相方さんを追加できます）';
   }));
   if (store.mode === 'local') $('#chatWho').textContent = 'ローカルモード（このブラウザだけ）';
+  mixer.setCloud(store.mode === 'firebase' ? { store, me: ME } : null);   // 本番モードなら、曲のアップロード・保存した曲の一覧を使える
   showGate(null);
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && panelOpen.chat) markRead(); });
@@ -698,6 +699,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
     if (st.status === 'ready') start(st);
     else {
       subs.forEach(f => { try { f(); } catch (e) {} }); subs = [];
+      mixer.setCloud(null);
       showGate(st.status, st.user);
       if (st.status === 'error') console.error(st.error);
     }

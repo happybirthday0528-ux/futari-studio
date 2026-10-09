@@ -1,0 +1,5 @@
+# アップロードされた音源（サーバー上だけに置く）
+data/*
+!data/.htaccess
+# 動作確認用の設定
+api/config.local.php

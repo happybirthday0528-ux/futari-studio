@@ -336,6 +336,58 @@ function applyWide() {
 $$('[data-wide]').forEach(b => b.addEventListener('click', () => { const k = b.dataset.wide; UI.wide[k] = !UI.wide[k]; saveUI(); applyWide(); }));
 applyWide();
 
+/* ---------- チャットの「窓」表示（移動・サイズ変更） ---------- */
+const CW_MIN = { w: 320, h: 360 };
+const isNarrow = () => window.innerWidth <= 720;
+function chatWin() {
+  const d = UI.chatWin || {};
+  const w = Math.max(CW_MIN.w, Math.min(d.w || 420, window.innerWidth - 16));
+  const h = Math.max(CW_MIN.h, Math.min(d.h || 620, window.innerHeight - 16));
+  const x = Math.max(8, Math.min(d.x ?? (window.innerWidth - w - 24), window.innerWidth - w - 8));
+  const y = Math.max(8, Math.min(d.y ?? 80, window.innerHeight - h - 8));
+  return { float: !!d.float, x, y, w, h };
+}
+function applyChatWin() {
+  const c = $('#chat'), g = chatWin(), b = $('#chatFloat');
+  c.classList.toggle('float', g.float);
+  b.setAttribute('aria-pressed', String(g.float));
+  b.setAttribute('aria-label', g.float ? '右側に固定する' : '自由に動かせる窓にする'); b.title = b.getAttribute('aria-label');
+  if (g.float) Object.assign(c.style, { left: g.x + 'px', top: g.y + 'px', width: g.w + 'px', height: g.h + 'px' });
+  else ['left', 'top', 'width', 'height'].forEach(k => c.style[k] = '');
+}
+function saveChatWin(p) { UI.chatWin = { ...(UI.chatWin || {}), ...p }; saveUI(); }
+$('#chatFloat').addEventListener('click', () => { const g = chatWin(); saveChatWin({ float: !g.float, x: g.x, y: g.y, w: g.w, h: g.h }); applyChatWin(); });
+// つかんで動かす（上部のタイトル部分）・右下の角でサイズ変更
+const CSS_KEY = { x: 'left', y: 'top', w: 'width', h: 'height' };
+function dragOn(handle, onMove) {
+  handle.addEventListener('pointerdown', e => {
+    if (!$('#chat').classList.contains('float') || isNarrow() || e.button !== 0 || e.target.closest('button')) return;
+    e.preventDefault(); const g = chatWin(), sx = e.clientX, sy = e.clientY, c = $('#chat'); let last = null;
+    c.classList.add('dragging'); handle.setPointerCapture(e.pointerId);
+    const move = ev => { last = onMove(g, ev.clientX - sx, ev.clientY - sy); Object.entries(last).forEach(([k, v]) => { c.style[CSS_KEY[k]] = v + 'px'; }); };
+    const up = () => {
+      handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', up); handle.removeEventListener('pointercancel', up);
+      c.classList.remove('dragging'); if (last) { saveChatWin(last); applyChatWin(); }
+    };
+    handle.addEventListener('pointermove', move); handle.addEventListener('pointerup', up); handle.addEventListener('pointercancel', up);
+  });
+}
+dragOn($('#chat .chd'), (g, dx, dy) => ({
+  x: Math.max(8, Math.min(g.x + dx, window.innerWidth - g.w - 8)),
+  y: Math.max(8, Math.min(g.y + dy, window.innerHeight - 60))
+}));
+dragOn($('#chatRsz'), (g, dx, dy) => ({
+  w: Math.max(CW_MIN.w, Math.min(g.w + dx, window.innerWidth - g.x - 8)),
+  h: Math.max(CW_MIN.h, Math.min(g.h + dy, window.innerHeight - g.y - 8))
+}));
+// 窓の上部をダブルクリックすると、元の位置・大きさに戻す
+$('#chat .chd').addEventListener('dblclick', e => {
+  if (e.target.closest('button') || !$('#chat').classList.contains('float')) return;
+  saveChatWin({ x: undefined, y: undefined, w: undefined, h: undefined }); applyChatWin();
+});
+window.addEventListener('resize', () => { if ($('#chat').classList.contains('float')) applyChatWin(); });
+applyChatWin();
+
 /* =====================================================================
    チャット
 ===================================================================== */

@@ -246,6 +246,24 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
 #chat{width:min(560px,100%)}
 #memo{width:min(1040px,100%)}
 .chat.wide{width:100%}
+/* チャットの「窓」表示：ドラッグで移動・右下の角でサイズ変更 */
+.chd .fl{margin-left:auto;font-size:17px}
+.chd .fl + .ex,.chd .fl ~ .x{margin-left:0}
+.chd .fl[aria-pressed="true"]{color:var(--p2);background:var(--panel2)}
+.rsz{display:none}
+#chat.float{right:auto;bottom:auto;border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.55);padding-top:0;padding-bottom:0;transform:none;opacity:0;transition:opacity .15s ease,visibility 0s .15s;min-width:320px;min-height:360px}
+#chat.float.open{opacity:1;transition:opacity .15s ease}
+#chat.float .chd{cursor:move;user-select:none;touch-action:none}
+#chat.float .chd button{cursor:pointer}
+#chat.float .ex{display:none}
+#chat.float .rsz{display:block;position:absolute;right:0;bottom:0;width:22px;height:22px;cursor:nwse-resize;touch-action:none;background:linear-gradient(135deg,transparent 50%,var(--dim) 50%,var(--dim) 58%,transparent 58%,transparent 70%,var(--dim) 70%,var(--dim) 78%,transparent 78%)}
+#chat.float.dragging{transition:none;user-select:none}
+@media (max-width:720px){
+  #chat.float{inset:0!important;width:100%!important;height:100%!important;border-radius:0;border:0;min-width:0;min-height:0}
+  #chat.float .rsz,.chd .fl{display:none}
+  #chat.float .chd{cursor:default}
+  .chd .fl + .ex{margin-left:auto}
+}
 .chd .who2{font-size:12px;color:var(--mute)}
 .nm2{font-size:11px;color:var(--p1);font-weight:600;margin-bottom:2px}
 .empty{color:var(--mute);font-size:13px;text-align:center;padding:24px 12px}
@@ -490,7 +508,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
 </div>
 
 <aside class="chat" id="chat" aria-label="チャット">
-  <div class="chd"><span class="av pt">💬</span><div><div class="nm">チャット</div><div class="who2" id="chatWho"></div></div><button class="x ex" data-wide="chat" aria-label="画面いっぱいに表示" title="画面いっぱいに表示">⤢</button><button class="x" id="chatClose" aria-label="チャットを閉じる">×</button></div>
+  <div class="chd"><span class="av pt">💬</span><div><div class="nm">チャット</div><div class="who2" id="chatWho"></div></div><button class="x fl" id="chatFloat" type="button" aria-pressed="false" aria-label="自由に動かせる窓にする" title="自由に動かせる窓にする">⧉</button><button class="x ex" data-wide="chat" aria-label="画面いっぱいに表示" title="画面いっぱいに表示">⤢</button><button class="x" id="chatClose" aria-label="チャットを閉じる">×</button></div>
   <div class="chb" id="chatBody" aria-live="polite"></div>
   <form class="chf" id="chatForm">
     <div class="pend" id="pend" hidden></div>
@@ -501,6 +519,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
     <div class="row"><textarea id="chatIn" rows="1" placeholder="メッセージを入力" aria-label="メッセージ"></textarea><button class="send" type="submit">送信</button></div>
     <div class="hint">Enterで送信・Shift+Enterで改行</div>
   </form>
+  <div class="rsz" id="chatRsz" aria-hidden="true" title="ドラッグでサイズ変更"></div>
 </aside>
 
 <aside class="chat" id="memo" aria-label="メモ帳" data-m="local">

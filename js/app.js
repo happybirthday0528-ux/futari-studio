@@ -103,7 +103,8 @@ const SEED = {
 
 /* ---------- 状態 ---------- */
 const UI_KEY = 'futari-studio-ui';
-const UI = Object.assign({ tab: 'lab', sel: 'c07', filter: 'all', wide: { chat: false, memo: false }, memoMode: 'shared' }, LS.get(UI_KEY, {}));
+const UI = Object.assign({ tab: 'lab', sel: 'c07', filter: 'all', wide: { chat: false, memo: false } }, LS.get(UI_KEY, {}));
+UI.memoMode = 'local';   // メモ帳はいつも「自分だけのメモ」から始める（共有は確認してから開く）
 const saveUI = () => LS.set(UI_KEY, UI);
 const SH = JSON.parse(JSON.stringify(DEF_SHARED));   // 2人で共有する制作データ
 let store = null, ME = { uid: 'local', name: 'あなた' }, AUTH = { isOwner: false };
@@ -318,7 +319,7 @@ function setPanel(name, open) {
   $('#' + name).classList.toggle('open', open);
   $('#' + name + 'Btn').setAttribute('aria-expanded', String(open));
   if (name === 'chat' && open) { renderChat(); markRead(); setTimeout(() => $('#chatIn').focus(), 260); }
-  if (name === 'memo' && open) { renderMemoList(); }
+  if (name === 'memo' && open) { if (UI.memoMode !== 'local') { flushMemo(); UI.memoMode = 'local'; } $('#memoSearch').value = ''; renderMemoList(); renderMemoEditor(true); }
   if (!open) $('#' + name + 'Btn').focus();
 }
 $('#chatBtn').addEventListener('click', () => setPanel('chat', !panelOpen.chat));
@@ -441,6 +442,9 @@ function renderMemoEditor(force) {
     if (force || document.activeElement !== $('#memoTitle')) $('#memoTitle').value = m.title || '';
     if (force || document.activeElement !== $('#memoTx')) $('#memoTx').value = m.body || '';
   }
+  $('#mBand').innerHTML = UI.memoMode === 'shared'
+    ? '👥 共有メモを編集中 <small>メンバー全員に見えます</small>'
+    : '🔒 自分だけのメモ <small>このパソコンだけに保存・相方さんには見えません</small>';
   $('#memoPin').setAttribute('aria-pressed', String(!!m.pinned));
   $('#memoWho').textContent = '最終更新：' + whenOf(m.updatedAt) + (UI.memoMode === 'shared' && m.updatedBy ? ' ・ ' + m.updatedBy : '');
   $('#memoCount').textContent = $('#memoTx').value.length + ' 文字';
@@ -503,7 +507,15 @@ $('#memoTx').addEventListener('input', () => { $('#memoCount').textContent = $('
 $('#memoTitle').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); $('#memoTx').focus(); } });
 $('#memoBack').addEventListener('click', () => { flushMemo(); $('#mbody').dataset.view = 'list'; });
 $('#memoCopy').addEventListener('click', () => copy(($('#memoTitle').value ? $('#memoTitle').value + '\n\n' : '') + $('#memoTx').value, 'メモを'));
-$$('.mtabs [data-m]').forEach(b => b.addEventListener('click', () => { flushMemo(); UI.memoMode = b.dataset.m; saveUI(); $('#memoSearch').value = ''; renderMemoList(); renderMemoEditor(true); }));
+function switchMemoMode(mode) { flushMemo(); UI.memoMode = mode; $('#memoSearch').value = ''; renderMemoList(); renderMemoEditor(true); }
+$$('.mtabs [data-m]').forEach(b => b.addEventListener('click', () => {
+  const mode = b.dataset.m; if (mode === UI.memoMode) return;
+  if (mode === 'shared') { $('#shareConfirm').hidden = false; setTimeout(() => $('#scCancel').focus(), 0); return; }   // 共有へ切り替える前に確認
+  switchMemoMode(mode);
+}));
+$('#scOk').addEventListener('click', () => { $('#shareConfirm').hidden = true; switchMemoMode('shared'); });
+$('#scCancel').addEventListener('click', () => { $('#shareConfirm').hidden = true; $('.mtabs [data-m="local"]').focus(); });
+$('#shareConfirm').addEventListener('click', e => { if (e.target.id === 'shareConfirm') $('#scCancel').click(); });
 window.addEventListener('beforeunload', () => { if (memoDirty) flushMemo(); });
 window.addEventListener('storage', e => { if (e.key === LOCAL_MEMO_KEY) { LOCAL_MEMOS = localMemos.load(); if (panelOpen.memo) renderMemoList(); } });
 
@@ -551,6 +563,7 @@ $('#memList').addEventListener('click', async e => {
 /* ---------- キーボード ---------- */
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
+    if (!$('#shareConfirm').hidden) { $('#scCancel').click(); return; }
     if (!$('#members').hidden) { $('#members').hidden = true; return; }
     if (panelOpen.chat) setPanel('chat', false); else if (panelOpen.memo) setPanel('memo', false);
     return;

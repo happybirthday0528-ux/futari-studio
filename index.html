@@ -367,6 +367,17 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
 .mxsongs{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:13px;max-width:min(320px,100%)}
 .mxsongs option{background:var(--panel2)}
 .mxprog .prog{margin-top:6px;max-width:520px}
+.mxlist{margin-top:12px}
+.mxlh{font-weight:700;margin-bottom:8px;display:flex;gap:8px;align-items:baseline}
+.mxcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px}
+.mxcard{display:grid;gap:3px;text-align:left;background:var(--bg);border:1px solid var(--line);border-left:3px solid var(--ac);border-radius:8px;padding:10px 12px;position:relative;min-width:0}
+.mxcard:hover{border-color:var(--ac)}
+.mxcard b{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:56px}
+.mxcard span{font-family:var(--mono);font-size:12px;color:var(--mute)}
+.mxcard small{font-size:11.5px;color:var(--dim)}
+.mxcard i{position:absolute;top:10px;right:12px;font-style:normal;font-size:12px;font-weight:700;color:var(--ac)}
+.mxcard[disabled]{opacity:.5}
+.note.warn{color:var(--p3)}
 .mxprog .prog i{background:var(--ac)}
 .mxpreset{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin-bottom:10px;padding:8px 10px;background:var(--bg);border:1px solid var(--line);border-radius:8px}
 .mxpreset .lbl{font-size:12px;color:var(--mute);font-weight:600}

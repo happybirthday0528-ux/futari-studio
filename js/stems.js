@@ -304,6 +304,7 @@ export function initMixer({ root, toast, onPlay }) {
         <span>「曲名 Stems (BPM).zip」と「曲名 MIDI.zip」を<b>まとめて</b>ドロップできます。ZIPを展開したフォルダや、WAV・MP3・MIDIのファイルでもOKです。</span>
         <span class="note" id="mxDropNote">読み込んだあと「アップロード」を押すと、相方さんと共有できます。保存した曲は、右上の一覧から開けます。</span></div>
     </div>
+    <div class="mxlist" id="mxList" hidden></div>
     <div class="mxprog" id="mxProg" hidden><span id="mxProgText"></span><div class="prog"><i id="mxProgBar" style="width:0"></i></div></div>
     <div id="mxBody" hidden>
       <div class="mxhead">
@@ -407,11 +408,19 @@ export function initMixer({ root, toast, onPlay }) {
     const exp = `<button class="btn" id="mxExport" type="button" title="今の音量・ミュート・ソロのまま、1本のWAVにします">⤓ 今のバランスでWAV書き出し</button>`;
     const zip = `<button class="btn" id="mxZip" type="button" title="WAV・MIDIをまとめてZIPでダウンロード">⤓ 一式をZIPでダウンロード</button>`;
     if (SET.songId) f.innerHTML = `${exp}${zip}<span class="spacer"></span><button class="btn danger" id="mxDelete" type="button">この曲を削除</button>`;
-    else if (cloud) f.innerHTML = `<button class="btn pri" id="mxUpload" type="button">☁ アップロードして相方さんと共有</button>${exp}<span class="note">アップロードすると、次からは右上の一覧から開けます</span>`;
+    else if (cloud && SET.pendingSong) f.innerHTML = `<button class="btn pri" id="mxUpload" type="button">☁ 曲の情報を保存し直す</button>${exp}<span class="note warn">⚠ 音源はサーバーに届いています。曲の情報（一覧に出すための情報）の保存だけ失敗しました。<b>このページを閉じずに</b>押してください</span>`;
+    else if (cloud) f.innerHTML = `<button class="btn pri" id="mxUpload" type="button">☁ アップロードして相方さんと共有</button>${exp}<span class="note">アップロードすると、次からは「保存した曲」から開けます</span>`;
     else f.innerHTML = `${exp}<span class="note">アップロードは、ログインしているとき（本番モード）に使えます</span>`;
   }
   function renderSongs() {
-    const sel = $('#mxSongs', root); sel.hidden = !cloud;
+    const sel = $('#mxSongs', root), list = $('#mxList', root); sel.hidden = !cloud;
+    list.hidden = !cloud || !!SET;
+    if (cloud && !SET) list.innerHTML = `<div class="mxlh">☁ 保存した曲 <span class="note">${SONGS.length}曲（相方さんと共有）</span></div>` + (SONGS.length
+      ? `<div class="mxcards">${SONGS.map(s => {
+          const tr = s.tracks || [], parts = tr.filter(t => !t.midiOnly).length, size = tr.reduce((n, t) => n + (t.size || 0) + (t.midi ? t.midi.size || 0 : 0), 0);
+          return `<button type="button" class="mxcard" data-open="${esc(s.id)}"${busy ? ' disabled' : ''}><b>${esc(s.title || '無題の曲')}</b><span>${s.bpm ? s.bpm + ' BPM ・ ' : ''}${fmt(s.dur)} ・ ${parts}パート ・ ${mb(size)}</span><small>${esc(s.createdByName || '')} ・ ${day(s.createdAt)} にアップロード</small><i>開く ▶</i></button>`;
+        }).join('')}</div>`
+      : '<p class="note">まだ保存した曲はありません。SUNOの一式を読み込んで「☁ アップロード」を押すと、ここに並びます。</p>');
     if (!cloud) return;
     sel.innerHTML = `<option value="">${SONGS.length ? `保存した曲を開く（${SONGS.length}曲）` : 'まだ保存した曲はありません'}</option>` +
       SONGS.map(s => `<option value="${esc(s.id)}"${SET && SET.songId === s.id ? ' selected' : ''}>${esc(s.title || '無題の曲')}（${day(s.createdAt)}・${esc(s.createdByName || '')}）</option>`).join('');
@@ -467,6 +476,7 @@ export function initMixer({ root, toast, onPlay }) {
   async function upload() {
     if (!SET || SET.songId || !cloud || busy) return;
     pause(); busy = true; renderSongs();
+    if (SET.pendingSong) return saveSongInfo(SET.pendingSong);   // 音源は送信済み → 曲の情報だけ保存し直す
     const song = rid(12), files = [];
     SET.tracks.forEach((t, i) => {
       if (t.blob) { t.key = `a${i}.${extOf(t.name)}`; files.push({ blob: t.blob, key: t.key }); }
@@ -478,17 +488,30 @@ export function initMixer({ root, toast, onPlay }) {
         await uploadFile(cloud, song, f.key, f.blob, n => { sent += n; progress(`アップロードしています… ${mb(sent)} / ${mb(total)}（画面を閉じないでください）`, total ? sent / total : 1); });
         cachePut(fileUrl(song, f.key), f.blob);   // 自分のパソコンでは、次からダウンロードせずに開ける
       }
-      progress('曲の情報を保存しています…', 1);
+    } catch (e) {
+      console.error(e);
+      toast('アップロードできませんでした：' + (e.message || e));
+      SET.tracks.forEach(t => { delete t.key; if (t.midi) delete t.midi.key; });
+      busy = false; progress(''); renderSongs(); return;
+    }
+    busy = false;
+    await saveSongInfo(song);
+  }
+  async function saveSongInfo(song) {
+    busy = true; progress('曲の情報を保存しています…', 1);
+    try {
       SET.title = $('#mxTitle', root).value.trim() || SET.title || '無題の曲';
       SET.presets = [];
       await cloud.store.saveSong(song, { title: SET.title, bpm: SET.bpm || null, dur: SET.dur, tracks: SET.tracks.map(trackDoc), mix: mixState(), presets: [] });
+      delete SET.pendingSong;
       SET.songId = song; SET.createdByName = cloud.me && cloud.me.name; SET.createdAt = Date.now();
       toast(`「${SET.title}」をアップロードしました。相方さんも一覧から開けます`);
       render();
     } catch (e) {
       console.error(e);
-      toast('アップロードできませんでした：' + (e.message || e));
-      SET.tracks.forEach(t => { delete t.key; if (t.midi) delete t.midi.key; });
+      SET.pendingSong = song;   // 音源はサーバーに届いている。情報だけ保存し直せるようにする
+      toast('音源のアップロードは完了しましたが、曲の情報を保存できませんでした（' + (e.code || e.message || e) + '）。Firestoreのルールを確認して「曲の情報を保存し直す」を押してください');
+      renderFoot();
     } finally { busy = false; progress(''); renderSongs(); }
   }
   async function deleteSong() {
@@ -561,6 +584,7 @@ export function initMixer({ root, toast, onPlay }) {
   $('#mxClear', root).addEventListener('click', () => clear());
   $('#mxTitle', root).addEventListener('input', e => { if (SET) { SET.title = e.target.value; changed('title'); } });
   $('#mxFiles', root).addEventListener('change', e => { load([...e.target.files].map(f => ({ name: f.name, path: f.name, blob: f }))); e.target.value = ''; });
+  $('#mxList', root).addEventListener('click', e => { const b = e.target.closest('[data-open]'); if (b) openSong(b.dataset.open); });
   $('#mxSongs', root).addEventListener('change', e => { const v = e.target.value; if (v && (!SET || SET.songId !== v)) openSong(v); });
   const tracksEl = $('#mxTracks', root);
   tracksEl.addEventListener('click', e => {
@@ -618,6 +642,6 @@ export function initMixer({ root, toast, onPlay }) {
   ['dragleave', 'drop'].forEach(ev => root.addEventListener(ev, e => { if (ev === 'dragleave' && root.contains(e.relatedTarget)) return; root.classList.remove('dragover'); }));
   root.addEventListener('drop', async e => { e.preventDefault(); load(await fromDataTransfer(e.dataTransfer)); });
   window.addEventListener('resize', () => draw());
-  window.addEventListener('beforeunload', e => { if (busy) { e.preventDefault(); e.returnValue = ''; } });   // アップロード中に閉じそうになったら確認
+  window.addEventListener('beforeunload', e => { if (busy || (SET && SET.pendingSong)) { e.preventDefault(); e.returnValue = ''; } });   // アップロード中に閉じそうになったら確認
   return m;
 }

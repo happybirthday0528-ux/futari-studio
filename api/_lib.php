@@ -101,7 +101,7 @@ function auth()
         touch($mark);
         if (mt_rand(1, 50) === 1) foreach (glob(DATA_DIR . '/.cache/auth_*') as $f) if (filemtime($f) < $now - 3600) @unlink($f);
     }
-    return ['uid' => $c['sub'], 'email' => isset($c['email']) ? $c['email'] : ''];
+    return ['uid' => $c['sub'], 'email' => isset($c['email']) ? strtolower($c['email']) : '', 'token' => $t];
 }
 
 // 入力のチェック（フォルダ名・ファイル名は英数字だけに限定）

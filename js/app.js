@@ -450,11 +450,19 @@ $('#chatBody').addEventListener('click', e => { const b = e.target.closest('[dat
 // 送信は Alt＋Enter（Macは option＋Enter）。Enter だけなら改行（うっかり送信を防ぐ）
 $('#chatIn').addEventListener('keydown', e => { if (e.key === 'Enter' && e.altKey && !e.isComposing) { e.preventDefault(); $('#chatForm').requestSubmit(); } });
 $('#chatIn').addEventListener('input', e => { const t = e.target; t.style.height = '44px'; t.style.height = Math.min(160, t.scrollHeight) + 'px'; });
+// 相手へのメール通知（相手が未読のあいだは最初の1通だけ。判断はサーバーの api/notify.php）
+async function notifyByMail(text) {
+  if (!store || store.mode !== 'firebase') return;
+  try {
+    const token = await store.getIdToken();
+    await fetch('api/notify.php', { method: 'POST', headers: { 'X-Studio-Token': token, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: ME.name, text }) });
+  } catch (e) { /* メールが送れなくてもチャットは届いているので、何もしない */ }
+}
 $('#chatForm').addEventListener('submit', async e => {
   e.preventDefault(); const v = $('#chatIn').value.trim(); if (!v && !pendRef) return; if (!store) return;
   const msg = { x: v || (pendRef && pendRef.k === 'memo' ? '📝 メモを送ります' : '（位置を共有しました）'), ref: pendRef || null };
   const t = $('#chatIn'); t.value = ''; t.style.height = '44px'; pendRef = null; renderPend();
-  try { await store.sendChat(msg); setTimeout(markRead, 600); }
+  try { await store.sendChat(msg); setTimeout(markRead, 600); notifyByMail(msg.x); }
   catch (err) { t.value = msg.x; toast('送信できませんでした。通信状況を確認してください'); }
 });
 

@@ -147,7 +147,7 @@ async function firebaseStore(cfg) {
       }));
     },
     markRead() {
-      return F.setDoc(F.doc(db, 'studios', SID, 'reads', store.me.uid), { at: F.serverTimestamp(), name: store.me.name });
+      return F.setDoc(F.doc(db, 'studios', SID, 'reads', store.me.uid), { at: F.serverTimestamp(), name: store.me.name, email: store.me.email });   // email はメール通知の判断に使う
     },
 
     onMemos(cb) {

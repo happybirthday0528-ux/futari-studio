@@ -168,7 +168,7 @@ textarea.credit{width:100%;min-height:150px;background:var(--bg);border:1px soli
 .filebtn{position:relative;overflow:hidden}
 .filebtn input{position:absolute;inset:0;opacity:0;cursor:pointer}
 
-#toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 16px;border-radius:8px;font-size:13px;max-width:calc(100% - 32px);opacity:0;pointer-events:none;transition:opacity .2s}
+#toast{position:fixed;z-index:45;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 16px;border-radius:8px;font-size:13px;max-width:calc(100% - 32px);opacity:0;pointer-events:none;transition:opacity .2s}
 #toast.on{opacity:1}
 .keys{font-size:12px;color:var(--mute);display:flex;flex-wrap:wrap;gap:4px 14px}
 kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;color:var(--fg)}
@@ -267,6 +267,11 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
 }
 .chd .who2{font-size:12px;color:var(--mute)}
 .nm2{font-size:11px;color:var(--p1);font-weight:600;margin-bottom:2px}
+.bub .txt{white-space:pre-wrap;overflow-wrap:anywhere}
+.bub.long:not(.open) .txt{max-height:11.5em;overflow:hidden;-webkit-mask-image:linear-gradient(#000 65%,transparent);mask-image:linear-gradient(#000 65%,transparent)}
+.bub .more{display:block;margin-top:4px;background:none;border:0;padding:2px 0;font-size:12px;font-weight:600;color:var(--p2)}
+.bub .ref{display:flex;width:fit-content}
+.btn.tochat{border-color:var(--p2);color:var(--p2)}
 .empty{color:var(--mute);font-size:13px;text-align:center;padding:24px 12px}
 .chf textarea{height:44px}
 .send{height:44px}
@@ -609,7 +614,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
       <div class="mehead need"><button class="btn back" id="memoBack" type="button">← 一覧</button><input id="memoTitle" placeholder="タイトル" aria-label="タイトル" autocomplete="off"><button class="btn" id="memoPin" type="button" aria-pressed="false" title="ピン留めすると一覧の上に固定されます">📌 ピン留め</button></div>
       <div class="note need" id="memoWho"></div>
       <textarea class="memotx need" id="memoTx" aria-label="メモの本文" placeholder="ここに書くと自動で保存されます"></textarea>
-      <div class="mfoot need"><span id="memoSaved"></span><span class="spacer"></span><span class="mono" id="memoCount"></span><button class="btn" id="memoCopy" type="button">コピー</button><button class="btn danger" id="memoDel" type="button">削除</button></div>
+      <div class="mfoot need"><span id="memoSaved"></span><span class="spacer"></span><span class="mono" id="memoCount"></span><button class="btn tochat" id="memoToChat" type="button" title="チャットの入力欄に貼り付けます（送信はチャットで確認してから）">💬 チャットに貼り付け</button><button class="btn" id="memoCopy" type="button">コピー</button><button class="btn danger" id="memoDel" type="button">削除</button></div>
       <div class="mempty" id="memoEmpty">左の一覧からメモを選ぶか、「＋ 新しいメモ」で作成してください</div>
     </div>
   </div>

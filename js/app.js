@@ -399,6 +399,7 @@ applyChatWin();
 const TABN = { orig: '原曲ボックス', lab: 'SUNOラボ', fin: '仕上げルーム', pub: '投稿準備' };
 const TABC = { orig: 'var(--p1)', lab: 'var(--p2)', fin: 'var(--p3)', pub: 'var(--p4)' };
 let CHAT = [], READS = { mine: 0, others: 0 }, pendRef = null;
+const OPEN_MSG = new Set();   // 「全文を表示」で開いている長文メッセージ
 function refInfo(r) {
   if (r.k === 'cand') return { c: TABC.lab, l: `${cand(r.id).no} ▶ ${fmt(r.t)}` };
   if (r.k === 'ab') return { c: TABC.fin, l: `${r.tr ? 'B' : 'A'}：${r.name || (r.tr ? 'MIX v2' : 'SUNO #07')} ▶ ${fmt(r.t)}` };
@@ -412,7 +413,8 @@ function renderChat() {
     const d = dayOf(m.at); if (d !== last) { html += `<div class="day">${d}</div>`; last = d; }
     const mine = m.uid === ME.uid, cls = mine ? 'me' : 'pt', ini = esc((m.name || '?').slice(0, 1));
     const read = mine && READS.others >= m.at ? '<span>既読</span>' : '';
-    html += `<div class="msg ${cls}"><span class="av ${cls}" title="${esc(m.name)}">${ini}</span><div class="bub">${mine ? '' : `<div class="nm2">${esc(m.name)}</div>`}${esc(m.x)}${m.ref ? '<br>' + refHtml(m.ref, m.id) : ''}</div><span class="mt2">${read}<span>${hmOf(m.at)}</span></span></div>`;
+    const long = (m.x || '').length > 400 || (m.x || '').split('\n').length > 10, open = OPEN_MSG.has(m.id);   // 長文は折りたたむ
+    html += `<div class="msg ${cls}"><span class="av ${cls}" title="${esc(m.name)}">${ini}</span><div class="bub${long ? ' long' : ''}${open ? ' open' : ''}">${mine ? '' : `<div class="nm2">${esc(m.name)}</div>`}<div class="txt">${esc(m.x)}</div>${long ? `<button type="button" class="more" data-more="${esc(m.id)}">${open ? '▲ 折りたたむ' : '▼ 全文を表示'}</button>` : ''}${m.ref ? refHtml(m.ref, m.id) : ''}</div><span class="mt2">${read}<span>${hmOf(m.at)}</span></span></div>`;
   });
   const b = $('#chatBody'); const atBottom = b.scrollHeight - b.scrollTop - b.clientHeight < 80;
   b.innerHTML = html; if (atBottom || !renderChat.done) b.scrollTop = b.scrollHeight; renderChat.done = true;
@@ -434,6 +436,11 @@ $('#attach').addEventListener('click', () => {
   renderPend(); $('#chatIn').focus();
 });
 $('#pend').addEventListener('click', e => { if (e.target.closest('.rm')) { pendRef = null; renderPend(); } });
+$('#chatBody').addEventListener('click', e => {
+  const mo = e.target.closest('[data-more]'); if (!mo) return;
+  const id = mo.dataset.more; OPEN_MSG.has(id) ? OPEN_MSG.delete(id) : OPEN_MSG.add(id);
+  const bub = mo.closest('.bub'), open = OPEN_MSG.has(id); bub.classList.toggle('open', open); mo.textContent = open ? '▲ 折りたたむ' : '▼ 全文を表示';
+});
 $('#chatBody').addEventListener('click', e => { const b = e.target.closest('[data-ref]'); if (!b) return; const m = CHAT.find(x => x.id === b.dataset.ref); if (m && m.ref) openRef(m.ref); });
 // 送信は Alt＋Enter（Macは option＋Enter）。Enter だけなら改行（うっかり送信を防ぐ）
 $('#chatIn').addEventListener('keydown', e => { if (e.key === 'Enter' && e.altKey && !e.isComposing) { e.preventDefault(); $('#chatForm').requestSubmit(); } });
@@ -565,6 +572,19 @@ $('#memoTx').addEventListener('input', () => { $('#memoCount').textContent = $('
 $('#memoTitle').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); $('#memoTx').focus(); } });
 $('#memoBack').addEventListener('click', () => { flushMemo(); $('#mbody').dataset.view = 'list'; });
 $('#memoCopy').addEventListener('click', () => copy(($('#memoTitle').value ? $('#memoTitle').value + '\n\n' : '') + $('#memoTx').value, 'メモを'));
+// メモの内容を、チャットの入力欄に貼り付ける（すぐには送信しない。確認してから Alt＋Enter で送信）
+$('#memoToChat').addEventListener('click', () => {
+  const title = $('#memoTitle').value.trim(), body = $('#memoTx').value.trim();
+  if (!title && !body) { toast('メモが空です'); return; }
+  flushMemo();
+  const text = (title ? '【' + title + '】\n' : '') + body;
+  setPanel('chat', true);
+  const t = $('#chatIn');
+  t.value = t.value.trim() ? t.value.replace(/\s+$/, '') + '\n\n' + text : text;   // 書きかけの文章は消さずに、その下に追加
+  t.dispatchEvent(new Event('input'));
+  setTimeout(() => { t.focus(); t.setSelectionRange(t.value.length, t.value.length); t.scrollTop = t.scrollHeight; }, 300);
+  toast('メモをチャットの入力欄に貼り付けました。内容を確認して Alt＋Enter で送信してください');
+});
 function switchMemoMode(mode) { flushMemo(); UI.memoMode = mode; $('#memoSearch').value = ''; renderMemoList(); renderMemoEditor(true); }
 $$('.mtabs [data-m]').forEach(b => b.addEventListener('click', () => {
   const mode = b.dataset.m; if (mode === UI.memoMode) return;

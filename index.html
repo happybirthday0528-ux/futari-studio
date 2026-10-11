@@ -194,6 +194,12 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
 .umenu button{background:none;border:0;text-align:left;padding:8px 10px;border-radius:6px}
 .umenu button:hover{background:var(--panel)}
 @media (max-width:720px){.top{gap:8px 10px}.top .song,.top .brand,.mode{display:none}.tools{margin-left:0;flex:1;flex-wrap:nowrap}.tbtn{flex:1;padding:8px 10px}.ubtn{padding:3px}.ubtn #userName{display:none}}
+.chbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.chbar .lbl{font-size:12px;color:var(--mute);font-weight:600;letter-spacing:.04em}
+.yt{display:inline-flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:4px 14px 4px 8px;color:var(--fg);text-decoration:none;font-size:13px;min-width:0}
+.yt:hover{border-color:#FF0033}
+.yt svg{width:22px;height:22px;flex:none}
+.yt span{font-family:var(--mono);font-size:11.5px;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .prodnote{display:flex;gap:10px;align-items:flex-start;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:9px 14px;font-size:13px;color:var(--mute)}
 .prodnote b{flex:none;background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:0 8px;font-size:12px;margin-top:1px}
 
@@ -433,6 +439,11 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
       </div>
     </div>
   </header>
+  <nav class="chbar" aria-label="2人のYouTubeチャンネル">
+    <span class="lbl">YouTube</span>
+    <a class="yt" href="https://www.youtube.com/@Toshi0528" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="4" fill="#FF0033"/><path d="M10 9l5 3-5 3z" fill="#fff"/></svg><b>Toshi</b><span>@Toshi0528</span></a>
+    <a class="yt" href="https://www.youtube.com/@kyohou-o2n" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="4" fill="#FF0033"/><path d="M10 9l5 3-5 3z" fill="#fff"/></svg><b>kyo hou</b><span>@kyohou-o2n</span></a>
+  </nav>
   <div class="prodnote"><b>お知らせ</b><span>チャットとメモ帳は本番稼働中です。曲データ（音源・候補・ステム）は今はサンプル表示で、次の段階で実際の音源をアップロードできるようにします。</span></div>
 
   <nav class="pipe" role="tablist" aria-label="制作工程">

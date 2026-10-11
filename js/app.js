@@ -403,6 +403,7 @@ const OPEN_MSG = new Set();   // 「全文を表示」で開いている長文�
 function refInfo(r) {
   if (r.k === 'cand') return { c: TABC.lab, l: `${cand(r.id).no} ▶ ${fmt(r.t)}` };
   if (r.k === 'ab') return { c: TABC.fin, l: `${r.tr ? 'B' : 'A'}：${r.name || (r.tr ? 'MIX v2' : 'SUNO #07')} ▶ ${fmt(r.t)}` };
+  if (r.k === 'memo') return { c: 'var(--p4)', l: `📝 ${r.title || '無題のメモ'}（${(r.body || '').split('\n').length}行）を開く` };
   return { c: TABC[r.tab] || 'var(--mute)', l: TABN[r.tab] || '' };
 }
 const refHtml = (r, id) => { const f = refInfo(r); return `<button type="button" class="ref" data-ref="${esc(id)}"><i style="background:${f.c}"></i><span>${esc(f.l)}</span></button>`; };
@@ -423,7 +424,8 @@ function renderChat() {
 function updBadge() { const un = CHAT.filter(m => m.uid !== ME.uid && m.at > READS.mine).length; $('#badge').hidden = !un; $('#badge').textContent = un > 99 ? '99+' : un; }
 function markRead() { if (!store || !CHAT.length) return; const last = CHAT[CHAT.length - 1]; if (last.at > READS.mine) { READS.mine = last.at; updBadge(); Promise.resolve(store.markRead()).catch(() => {}); } }
 function renderPend() { const p = $('#pend'); p.hidden = !pendRef; p.innerHTML = pendRef ? `添付：${refHtml(pendRef, '')}<button type="button" class="rm" aria-label="添付を外す">×</button>` : ''; }
-function openRef(r) {
+function openRef(r, msg) {
+  if (r.k === 'memo') { openMemoView(r, msg); return; }   // メモの添付は、動かせる小窓で開く（チャットは閉じない）
   if (r.k === 'cand') { showTab('lab'); if (UI.sel !== r.id) { UI.sel = r.id; saveUI(); renderCands(); renderLab(); } lab.seek(r.t); }
   else if (r.k === 'ab') { showTab('fin'); ab.setTrack(r.tr); ab.seek(r.t); }
   else if (r.tab) showTab(r.tab);
@@ -435,19 +437,22 @@ $('#attach').addEventListener('click', () => {
   else pendRef = { k: 'tab', tab: UI.tab };
   renderPend(); $('#chatIn').focus();
 });
-$('#pend').addEventListener('click', e => { if (e.target.closest('.rm')) { pendRef = null; renderPend(); } });
+$('#pend').addEventListener('click', e => {
+  if (e.target.closest('.rm')) { pendRef = null; renderPend(); }
+  else if (e.target.closest('.ref') && pendRef && pendRef.k === 'memo') openMemoView(pendRef, { name: ME.name, at: Date.now(), preview: true });   // 送る前に中身を確認
+});
 $('#chatBody').addEventListener('click', e => {
   const mo = e.target.closest('[data-more]'); if (!mo) return;
   const id = mo.dataset.more; OPEN_MSG.has(id) ? OPEN_MSG.delete(id) : OPEN_MSG.add(id);
   const bub = mo.closest('.bub'), open = OPEN_MSG.has(id); bub.classList.toggle('open', open); mo.textContent = open ? '▲ 折りたたむ' : '▼ 全文を表示';
 });
-$('#chatBody').addEventListener('click', e => { const b = e.target.closest('[data-ref]'); if (!b) return; const m = CHAT.find(x => x.id === b.dataset.ref); if (m && m.ref) openRef(m.ref); });
+$('#chatBody').addEventListener('click', e => { const b = e.target.closest('[data-ref]'); if (!b) return; const m = CHAT.find(x => x.id === b.dataset.ref); if (m && m.ref) openRef(m.ref, m); });
 // 送信は Alt＋Enter（Macは option＋Enter）。Enter だけなら改行（うっかり送信を防ぐ）
 $('#chatIn').addEventListener('keydown', e => { if (e.key === 'Enter' && e.altKey && !e.isComposing) { e.preventDefault(); $('#chatForm').requestSubmit(); } });
 $('#chatIn').addEventListener('input', e => { const t = e.target; t.style.height = '44px'; t.style.height = Math.min(160, t.scrollHeight) + 'px'; });
 $('#chatForm').addEventListener('submit', async e => {
   e.preventDefault(); const v = $('#chatIn').value.trim(); if (!v && !pendRef) return; if (!store) return;
-  const msg = { x: v || '（位置を共有しました）', ref: pendRef || null };
+  const msg = { x: v || (pendRef && pendRef.k === 'memo' ? '📝 メモを送ります' : '（位置を共有しました）'), ref: pendRef || null };
   const t = $('#chatIn'); t.value = ''; t.style.height = '44px'; pendRef = null; renderPend();
   try { await store.sendChat(msg); setTimeout(markRead, 600); }
   catch (err) { t.value = msg.x; toast('送信できませんでした。通信状況を確認してください'); }
@@ -572,19 +577,62 @@ $('#memoTx').addEventListener('input', () => { $('#memoCount').textContent = $('
 $('#memoTitle').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); $('#memoTx').focus(); } });
 $('#memoBack').addEventListener('click', () => { flushMemo(); $('#mbody').dataset.view = 'list'; });
 $('#memoCopy').addEventListener('click', () => copy(($('#memoTitle').value ? $('#memoTitle').value + '\n\n' : '') + $('#memoTx').value, 'メモを'));
-// メモの内容を、チャットの入力欄に貼り付ける（すぐには送信しない。確認してから Alt＋Enter で送信）
+// メモをチャットに「添付」する（送るのは今の内容の控え。受け取った側は動かせる小窓で開ける）
+const MEMO_ATTACH_MAX = 20000;
 $('#memoToChat').addEventListener('click', () => {
-  const title = $('#memoTitle').value.trim(), body = $('#memoTx').value.trim();
-  if (!title && !body) { toast('メモが空です'); return; }
+  const title = $('#memoTitle').value.trim(), body = $('#memoTx').value.replace(/\s+$/, '');
+  if (!title && !body.trim()) { toast('メモが空です'); return; }
   flushMemo();
-  const text = (title ? '【' + title + '】\n' : '') + body;
-  setPanel('chat', true);
-  const t = $('#chatIn');
-  t.value = t.value.trim() ? t.value.replace(/\s+$/, '') + '\n\n' + text : text;   // 書きかけの文章は消さずに、その下に追加
-  t.dispatchEvent(new Event('input'));
-  setTimeout(() => { t.focus(); t.setSelectionRange(t.value.length, t.value.length); t.scrollTop = t.scrollHeight; }, 300);
-  toast('メモをチャットの入力欄に貼り付けました。内容を確認して Alt＋Enter で送信してください');
+  if (body.length > MEMO_ATTACH_MAX) toast(`メモが長いため、最初の${MEMO_ATTACH_MAX.toLocaleString()}文字だけを添付します`);
+  pendRef = { k: 'memo', title: title || '無題のメモ', body: body.slice(0, MEMO_ATTACH_MAX) };
+  setPanel('chat', true); renderPend();
+  setTimeout(() => $('#chatIn').focus(), 300);
+  toast('メモをチャットに添付しました。ひとこと添えて Alt＋Enter で送信できます');
 });
+
+/* ---------- 添付されたメモを開く小窓（移動・サイズ変更できる。開いたままチャットで返信できる） ---------- */
+let mvRef = null;
+function mvGeom() {
+  const d = UI.mvWin || {}, W = window.innerWidth, H = window.innerHeight;
+  const w = Math.max(300, Math.min(d.w || 440, W - 16)), h = Math.max(240, Math.min(d.h || 480, H - 16));
+  return { w, h, x: Math.max(8, Math.min(d.x ?? Math.max(8, W - w - 600), W - w - 8)), y: Math.max(8, Math.min(d.y ?? 90, H - 60)) };
+}
+function placeMv() { const g = mvGeom(), el = $('#mview'); Object.assign(el.style, { left: g.x + 'px', top: g.y + 'px', width: g.w + 'px', height: g.h + 'px' }); }
+function openMemoView(r, msg) {
+  mvRef = r;
+  $('#mvTitle').textContent = r.title || '無題のメモ';
+  $('#mvMeta').textContent = msg && msg.preview ? '送る前の確認（まだ送信していません）' : `${msg && msg.name ? msg.name : ''}${msg && msg.at ? ' ・ ' + whenOf(msg.at) : ''} に送ったメモ`;
+  $('#mvBody').textContent = r.body || '';
+  $('#mvCount').textContent = (r.body || '').length + ' 文字';
+  const el = $('#mview'); el.hidden = false; placeMv(); $('#mvBody').scrollTop = 0;
+}
+$('#mvClose').addEventListener('click', () => { $('#mview').hidden = true; });
+$('#mvCopy').addEventListener('click', () => mvRef && copy(mvRef.body || '', 'メモを'));
+$('#mvSave').addEventListener('click', () => {
+  if (!mvRef) return;
+  LOCAL_MEMOS.push({ id: newId(), title: mvRef.title || '受け取ったメモ', body: mvRef.body || '', pinned: false, updatedAt: Date.now() });
+  localMemos.save(LOCAL_MEMOS); if (panelOpen.memo && UI.memoMode === 'local') renderMemoList();
+  toast('「自分だけのメモ」に保存しました');
+});
+$('#mvReply').addEventListener('click', () => { setPanel('chat', true); setTimeout(() => $('#chatIn').focus(), 300); });
+// 上部をつかんで移動・右下の角（CSSのresize）でサイズ変更。位置と大きさはブラウザが覚える
+$('#mvHead').addEventListener('pointerdown', e => {
+  if (e.button !== 0 || e.target.closest('button') || window.innerWidth <= 720) return;
+  e.preventDefault(); const el = $('#mview'), g = mvGeom(), sx = e.clientX, sy = e.clientY, h = e.currentTarget; let last = null;
+  h.setPointerCapture(e.pointerId);
+  const move = ev => { last = { x: Math.max(8, Math.min(g.x + ev.clientX - sx, window.innerWidth - g.w - 8)), y: Math.max(8, Math.min(g.y + ev.clientY - sy, window.innerHeight - 60)) }; el.style.left = last.x + 'px'; el.style.top = last.y + 'px'; };
+  const up = () => { h.removeEventListener('pointermove', move); h.removeEventListener('pointerup', up); h.removeEventListener('pointercancel', up); if (last) { UI.mvWin = { ...(UI.mvWin || {}), ...last }; saveUI(); } };
+  h.addEventListener('pointermove', move); h.addEventListener('pointerup', up); h.addEventListener('pointercancel', up);
+});
+if (window.ResizeObserver) {
+  let rt = 0;
+  new ResizeObserver(() => {
+    const el = $('#mview'); if (el.hidden || window.innerWidth <= 720) return;
+    clearTimeout(rt); rt = setTimeout(() => { UI.mvWin = { ...(UI.mvWin || {}), w: el.offsetWidth, h: el.offsetHeight }; saveUI(); }, 300);
+  }).observe($('#mview'));
+}
+$('#mvHead').addEventListener('dblclick', e => { if (e.target.closest('button')) return; UI.mvWin = {}; saveUI(); placeMv(); });   // ダブルクリックで元の位置・大きさ
+window.addEventListener('resize', () => { if (!$('#mview').hidden) placeMv(); });
 function switchMemoMode(mode) { flushMemo(); UI.memoMode = mode; $('#memoSearch').value = ''; renderMemoList(); renderMemoEditor(true); }
 $$('.mtabs [data-m]').forEach(b => b.addEventListener('click', () => {
   const mode = b.dataset.m; if (mode === UI.memoMode) return;
@@ -642,6 +690,7 @@ $('#memList').addEventListener('click', async e => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     if (!$('#shareConfirm').hidden) { $('#scCancel').click(); return; }
+    if (!$('#mview').hidden) { $('#mview').hidden = true; return; }
     if (!$('#members').hidden) { $('#members').hidden = true; return; }
     if (panelOpen.chat) setPanel('chat', false); else if (panelOpen.memo) setPanel('memo', false);
     return;

@@ -435,7 +435,8 @@ $('#attach').addEventListener('click', () => {
 });
 $('#pend').addEventListener('click', e => { if (e.target.closest('.rm')) { pendRef = null; renderPend(); } });
 $('#chatBody').addEventListener('click', e => { const b = e.target.closest('[data-ref]'); if (!b) return; const m = CHAT.find(x => x.id === b.dataset.ref); if (m && m.ref) openRef(m.ref); });
-$('#chatIn').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#chatForm').requestSubmit(); } });
+// 送信は Alt＋Enter（Macは option＋Enter）。Enter だけなら改行（うっかり送信を防ぐ）
+$('#chatIn').addEventListener('keydown', e => { if (e.key === 'Enter' && e.altKey && !e.isComposing) { e.preventDefault(); $('#chatForm').requestSubmit(); } });
 $('#chatIn').addEventListener('input', e => { const t = e.target; t.style.height = '44px'; t.style.height = Math.min(160, t.scrollHeight) + 'px'; });
 $('#chatForm').addEventListener('submit', async e => {
   e.preventDefault(); const v = $('#chatIn').value.trim(); if (!v && !pendRef) return; if (!store) return;

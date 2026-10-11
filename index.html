@@ -239,7 +239,8 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
 .pend{display:flex;align-items:center;gap:6px;font-size:12px}
 .pend .ref{margin:0}
 .pend button.rm{background:none;border:0;color:var(--mute);font-size:16px}
-.hint{font-size:11px;color:var(--dim)}
+.hint{font-size:11.5px;color:var(--mute);line-height:1.8}
+.hint kbd{font-size:10.5px}
 
 .chd .ex{margin-left:auto;font-size:17px}
 .chd .ex + .x{margin-left:0}
@@ -584,8 +585,8 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
       <button class="btn" type="button" id="attach" title="今見ている候補・再生位置をメッセージに付けます">今の位置を添付</button>
       <span class="spacer"></span>
     </div>
-    <div class="row"><textarea id="chatIn" rows="1" placeholder="メッセージを入力" aria-label="メッセージ"></textarea><button class="send" type="submit">送信</button></div>
-    <div class="hint">Enterで送信・Shift+Enterで改行</div>
+    <div class="row"><textarea id="chatIn" rows="1" placeholder="メッセージを入力（Alt＋Enterで送信）" aria-label="メッセージ" aria-describedby="chatHint"></textarea><button class="send" type="submit" title="Alt＋Enter でも送信できます">送信</button></div>
+    <div class="hint" id="chatHint"><kbd>Enter</kbd> 改行 ／ <kbd>Alt</kbd>＋<kbd>Enter</kbd> 送信（Macは <kbd>option</kbd>＋<kbd>Enter</kbd>）／ スマホは「送信」ボタン</div>
   </form>
   <div class="rsz" id="chatRsz" aria-hidden="true" title="ドラッグでサイズ変更"></div>
 </aside>

@@ -423,7 +423,11 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
 .modal{position:fixed;inset:0;z-index:35;background:rgba(0,0,0,.55);display:grid;place-items:center;padding:16px}
 .mbox{width:min(480px,100%);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:10px}
 .mbox h2{margin:0;font-size:16px}
-.mem{display:flex;align-items:center;gap:8px;justify-content:space-between;padding:8px 0;border-top:1px solid var(--line);font-size:13.5px;overflow-wrap:anywhere}
+.mem{display:flex;flex-direction:column;gap:6px;padding:10px 0;border-top:1px solid var(--line);font-size:13.5px;overflow-wrap:anywhere}
+.memrow{display:flex;align-items:center;gap:8px;justify-content:space-between}
+.memname{display:flex;gap:6px;align-items:center}
+.memname label{display:flex;align-items:center;gap:8px;flex:1;min-width:0;font-size:12px;color:var(--mute)}
+.memname input{flex:1;min-width:0;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:13.5px;color:var(--fg)}
 .mem:first-child{border-top:0}
 .mem .btn.armed{background:var(--warn);color:#fff}
 .mbox .add input{padding:8px 10px}
@@ -454,7 +458,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
   <nav class="chbar" aria-label="2人のYouTubeチャンネル">
     <span class="lbl">YouTube</span>
     <a class="yt" href="https://www.youtube.com/@Toshi0528" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="4" fill="#FF0033"/><path d="M10 9l5 3-5 3z" fill="#fff"/></svg><b>Toshi</b><span>@Toshi0528</span></a>
-    <a class="yt" href="https://www.youtube.com/@kyohou-o2n" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="4" fill="#FF0033"/><path d="M10 9l5 3-5 3z" fill="#fff"/></svg><b>kyo hou</b><span>@kyohou-o2n</span></a>
+    <a class="yt" href="https://www.youtube.com/@kyohou-o2n" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="4" fill="#FF0033"/><path d="M10 9l5 3-5 3z" fill="#fff"/></svg><b>福田雅</b><span>@kyohou-o2n</span></a>
   </nav>
   <div class="prodnote"><b>お知らせ</b><span>チャットとメモ帳は本番稼働中です。曲データ（音源・候補・ステム）は今はサンプル表示で、次の段階で実際の音源をアップロードできるようにします。</span></div>
 
@@ -654,7 +658,7 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
 <div class="modal" id="members" role="dialog" aria-modal="true" aria-labelledby="memTitle" hidden>
   <div class="mbox">
     <h2 id="memTitle">メンバー管理</h2>
-    <p class="note">ここに登録したGoogleアカウントの人だけが、ふたりスタジオを開けます。相方さんのGmailアドレスを追加してください。</p>
+    <p class="note">ここに登録したGoogleアカウントの人だけが、ふたりスタジオを開けます。相方さんのGmailアドレスを追加してください。「表示名」は、チャットやコメントに表示される名前です。</p>
     <ul class="clean" id="memList"></ul>
     <form class="add" id="memAdd"><input id="memEmail" type="email" placeholder="例：partner@gmail.com" aria-label="追加するメールアドレス" autocomplete="off"><button class="btn pri" type="submit">追加</button></form>
     <div style="display:flex;justify-content:flex-end"><button class="btn" id="memClose" type="button">閉じる</button></div>

@@ -60,6 +60,7 @@ function localStore(seed) {
     async deleteMemo(id) { D.memos = D.memos.filter(x => x.id !== id); persist(); emit('memos'); },
     onMembers() { return () => {}; },
     async setMembers() {},
+    async setNames() {},
     // 曲のアップロードは本番モード（Firebase）のときだけ
     async getIdToken() { return ''; },
     onSongs(cb) { cb([]); return () => {}; },
@@ -141,9 +142,9 @@ async function firebaseStore(cfg) {
     },
     onReads(cb) {
       return keep(F.onSnapshot(col('reads'), s => {
-        let mine = 0, others = 0;
-        s.docs.forEach(d => { const t = ms(d.data({ serverTimestamps: 'estimate' }).at); if (d.id === store.me.uid) mine = t; else others = Math.max(others, t); });
-        cb({ mine, others });
+        let mine = 0, others = 0; const emails = {};   // emails：uid → メールアドレス（表示名の対応に使う）
+        s.docs.forEach(d => { const v = d.data({ serverTimestamps: 'estimate' }), t = ms(v.at); if (v.email) emails[d.id] = v.email; if (d.id === store.me.uid) mine = t; else others = Math.max(others, t); });
+        cb({ mine, others, emails });
       }));
     },
     markRead() {
@@ -169,6 +170,7 @@ async function firebaseStore(cfg) {
 
     onMembers(cb) { return keep(F.onSnapshot(root, s => cb(s.data() || {}))); },
     async setMembers(list) { await F.updateDoc(root, { members: list }); },
+    async setNames(names) { await F.updateDoc(root, { names }); },   // 表示名（メールアドレス → 名前）。オーナーだけが変更できる
 
     // 曲（アップロードした音源の情報・ミックスの状態・バランス案）
     async getIdToken() { return auth.currentUser ? auth.currentUser.getIdToken() : ''; },

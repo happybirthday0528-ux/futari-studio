@@ -120,8 +120,11 @@ function saveShared(...keys) {
   }, 350);
 }
 // 誰の書き込みか（サンプルの 'me' / 'pt' と、本番の uid の両方に対応）
+// 表示名：オーナーが「メンバー管理」で決めた名前を、Googleアカウントの名前より優先する
+let NAMES = {}, UID_EMAIL = {};
+const dispName = (uid, fallback) => NAMES[UID_EMAIL[uid]] || fallback || '相方';
 const isMine = x => x.by === 'me' ? ME.uid === 'local' || AUTH.isOwner : x.by === ME.uid;
-const whoName = x => isMine(x) ? 'あなた' : (x.name || '相方');
+const whoName = x => isMine(x) ? 'あなた' : dispName(x.by, x.name);
 const whoCls = x => isMine(x) ? 'me' : 'pt';
 
 /* ---------- 波形 ---------- */
@@ -412,10 +415,10 @@ function renderChat() {
   if (!CHAT.length) html = '<div class="empty">まだメッセージはありません。最初のひとことを送ってみましょう。</div>';
   CHAT.forEach(m => {
     const d = dayOf(m.at); if (d !== last) { html += `<div class="day">${d}</div>`; last = d; }
-    const mine = m.uid === ME.uid, cls = mine ? 'me' : 'pt', ini = esc((m.name || '?').slice(0, 1));
+    const mine = m.uid === ME.uid, cls = mine ? 'me' : 'pt', nm = dispName(m.uid, m.name), ini = esc((nm || '?').slice(0, 1));
     const read = mine && READS.others >= m.at ? '<span>既読</span>' : '';
     const long = (m.x || '').length > 400 || (m.x || '').split('\n').length > 10, open = OPEN_MSG.has(m.id);   // 長文は折りたたむ
-    html += `<div class="msg ${cls}"><span class="av ${cls}" title="${esc(m.name)}">${ini}</span><div class="bub${long ? ' long' : ''}${open ? ' open' : ''}">${mine ? '' : `<div class="nm2">${esc(m.name)}</div>`}<div class="txt">${esc(m.x)}</div>${long ? `<button type="button" class="more" data-more="${esc(m.id)}">${open ? '▲ 折りたたむ' : '▼ 全文を表示'}</button>` : ''}${m.ref ? refHtml(m.ref, m.id) : ''}</div><span class="mt2">${read}<span>${hmOf(m.at)}</span></span></div>`;
+    html += `<div class="msg ${cls}"><span class="av ${cls}" title="${esc(nm)}">${ini}</span><div class="bub${long ? ' long' : ''}${open ? ' open' : ''}">${mine ? '' : `<div class="nm2">${esc(nm)}</div>`}<div class="txt">${esc(m.x)}</div>${long ? `<button type="button" class="more" data-more="${esc(m.id)}">${open ? '▲ 折りたたむ' : '▼ 全文を表示'}</button>` : ''}${m.ref ? refHtml(m.ref, m.id) : ''}</div><span class="mt2">${read}<span>${hmOf(m.at)}</span></span></div>`;
   });
   const b = $('#chatBody'); const atBottom = b.scrollHeight - b.scrollTop - b.clientHeight < 80;
   b.innerHTML = html; if (atBottom || !renderChat.done) b.scrollTop = b.scrollHeight; renderChat.done = true;
@@ -678,7 +681,8 @@ document.addEventListener('click', e => { if (!e.target.closest('.user')) { $('#
 
 let MEMBERS = { members: [], owner: '' };
 function renderMembers() {
-  $('#memList').innerHTML = (MEMBERS.members || []).map(em => `<li class="mem"><span>${esc(em)}</span>${em === MEMBERS.owner ? '<span class="pill keep">オーナー</span>' : `<button class="btn" data-rm="${esc(em)}">外す</button>`}</li>`).join('');
+  $('#memList').innerHTML = (MEMBERS.members || []).map(em => `<li class="mem"><div class="memrow"><span class="mail">${esc(em)}</span>${em === MEMBERS.owner ? '<span class="pill keep">オーナー</span>' : `<button class="btn" data-rm="${esc(em)}">外す</button>`}</div>
+    <form class="memname" data-email="${esc(em)}"><label>表示名<input value="${esc((MEMBERS.names || {})[em] || '')}" placeholder="空欄ならGoogleアカウントの名前" autocomplete="off"></label><button class="btn" type="submit">保存</button></form></li>`).join('');
 }
 $('#membersBtn').addEventListener('click', () => { $('#userMenu').hidden = true; renderMembers(); $('#members').hidden = false; setTimeout(() => $('#memEmail').focus(), 0); });
 $('#memClose').addEventListener('click', () => { $('#members').hidden = true; });
@@ -687,6 +691,12 @@ $('#memAdd').addEventListener('submit', async e => {
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) { toast('メールアドレスの形式を確認してください'); return; }
   const list = MEMBERS.members || []; if (list.includes(em)) { toast('すでに登録されています'); return; }
   try { await store.setMembers([...list, em]); $('#memEmail').value = ''; toast(em + ' を追加しました'); } catch (err) { toast('追加できませんでした（オーナーだけが変更できます）'); }
+});
+$('#memList').addEventListener('submit', async e => {
+  const f = e.target.closest('.memname'); if (!f) return; e.preventDefault();
+  const em = f.dataset.email, v = f.querySelector('input').value.trim().slice(0, 30), names = { ...(MEMBERS.names || {}) };
+  if (v) names[em] = v; else delete names[em];
+  try { await store.setNames(names); toast(v ? `表示名を「${v}」にしました` : '表示名を元に戻しました'); } catch (err) { toast('保存できませんでした（オーナーだけが変更できます）'); }
 });
 $('#memList').addEventListener('click', async e => {
   const b = e.target.closest('[data-rm]'); if (!b) return;
@@ -733,7 +743,7 @@ function setMode(mode) {
   c.title = mode === 'firebase' ? 'メンバー全員とデータを共有しています' : 'Firebase未設定のため、このブラウザの中にだけ保存しています';
 }
 function start(st) {
-  ME = st.user; AUTH = { isOwner: !!st.isOwner };
+  ME = st.user; AUTH = { isOwner: !!st.isOwner }; ME.googleName = ME.googleName || ME.name;
   $('#userName').textContent = ME.name; $('#userAv').textContent = (ME.name || '?').slice(0, 1);
   $('#userEmail').textContent = ME.email || 'ローカルモード（ログインなし）';
   $('#membersBtn').hidden = !AUTH.isOwner; $('#logoutBtn').hidden = store.mode !== 'firebase';
@@ -746,17 +756,20 @@ function start(st) {
   subs.push(store.onChat(list => {
     const before = CHAT.length ? CHAT[CHAT.length - 1].id : null; CHAT = list;
     const last = list[list.length - 1];
-    if (last && last.id !== before && last.uid !== ME.uid && renderChat.done && !panelOpen.chat) toast((last.name || '相方') + '：' + last.x.slice(0, 30));
+    if (last && last.id !== before && last.uid !== ME.uid && renderChat.done && !panelOpen.chat) toast(dispName(last.uid, last.name) + '：' + last.x.slice(0, 30));
     renderChat(); if (panelOpen.chat && document.visibilityState === 'visible') markRead();
   }));
-  subs.push(store.onReads(r => { READS = r; renderChat(); }));
+  subs.push(store.onReads(r => { READS = r; UID_EMAIL = r.emails || {}; renderChat(); renderLab(); renderRevs(); }));
   subs.push(store.onMemos(list => {
     SHARED_MEMOS = list;
     if (memoSel.shared && !list.find(m => m.id === memoSel.shared)) memoSel.shared = null;
     if (panelOpen.memo && UI.memoMode === 'shared') renderMemoList();
   }));
   subs.push(store.onMembers(d => {
-    MEMBERS = d; renderMembers();
+    MEMBERS = d; NAMES = d.names || {};
+    const myName = NAMES[ME.email] || ME.googleName;   // 自分の表示名（新しく送るメッセージやメール通知に使う）
+    if (myName && myName !== ME.name) { ME.name = myName; $('#userName').textContent = ME.name; $('#userAv').textContent = ME.name.slice(0, 1); }
+    renderMembers(); renderChat(); renderLab(); renderRevs();
     const others = (d.members || []).filter(x => x !== ME.email).length;
     $('#chatWho').textContent = others ? `メンバー ${others + 1}人` : 'まだあなただけです（メンバー管理から相方さんを追加できます）';
   }));

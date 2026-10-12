@@ -21,10 +21,24 @@ function fs_value($v)
     if (isset($v['timestampValue'])) return strtotime($v['timestampValue']);
     if (isset($v['integerValue'])) return (int)$v['integerValue'];
     if (isset($v['arrayValue'])) return array_map('fs_value', isset($v['arrayValue']['values']) ? $v['arrayValue']['values'] : []);
+    if (isset($v['mapValue'])) return array_map('fs_value', isset($v['mapValue']['fields']) ? $v['mapValue']['fields'] : []);
     return null;
 }
 
 // メンバー一覧（メール）と、各メンバーの最後にチャットを読んだ時刻（メール → UNIX時刻）
+// メンバーごとのお知らせメールの宛先：ログインしているアドレス＋「追加の宛先」（重複・不正な形式は除く）
+function notify_addresses($member, $notifyTo)
+{
+    $list = [$member];
+    if (isset($notifyTo[$member]) && is_array($notifyTo[$member])) $list = array_merge($list, $notifyTo[$member]);
+    $out = [];
+    foreach ($list as $a) {
+        $a = strtolower(trim((string)$a));
+        if (filter_var($a, FILTER_VALIDATE_EMAIL) && !in_array($a, $out, true)) $out[] = $a;
+    }
+    return array_slice($out, 0, 5);
+}
+
 function fs_members_and_reads($token)
 {
     $base = 'https://firestore.googleapis.com/v1/projects/' . FB_PROJECT_ID . '/databases/(default)/documents/studios/' . STUDIO_ID;
@@ -32,6 +46,8 @@ function fs_members_and_reads($token)
     $doc = json_decode($body, true);
     if ($code !== 200 || !$doc) fail(502, 'メンバー一覧を読めませんでした');
     $members = array_map('strtolower', isset($doc['fields']['members']) ? fs_value($doc['fields']['members']) : []);
+    $notifyTo = [];   // メンバー（ログインのアドレス）→ 追加の宛先
+    if (isset($doc['fields']['notifyTo'])) foreach ((array)fs_value($doc['fields']['notifyTo']) as $k => $v) $notifyTo[strtolower($k)] = is_array($v) ? $v : [];
 
     list($code, $body) = http_get($base . '/reads?pageSize=100', ['Authorization: Bearer ' . $token]);
     $list = json_decode($body, true);
@@ -44,7 +60,7 @@ function fs_members_and_reads($token)
             $reads[$email] = max(isset($reads[$email]) ? $reads[$email] : 0, (int)fs_value($f['at']));
         }
     }
-    return [$members, $reads];
+    return [$members, $reads, $notifyTo];
 }
 
 function notify_mail_text($name, $text)

@@ -61,6 +61,7 @@ function localStore(seed) {
     onMembers() { return () => {}; },
     async setMembers() {},
     async setNames() {},
+    async setNotifyTo() {},
     // 曲のアップロードは本番モード（Firebase）のときだけ
     async getIdToken() { return ''; },
     onSongs(cb) { cb([]); return () => {}; },
@@ -170,7 +171,8 @@ async function firebaseStore(cfg) {
 
     onMembers(cb) { return keep(F.onSnapshot(root, s => cb(s.data() || {}))); },
     async setMembers(list) { await F.updateDoc(root, { members: list }); },
-    async setNames(names) { await F.updateDoc(root, { names }); },   // 表示名（メールアドレス → 名前）。オーナーだけが変更できる
+    async setNames(names) { await F.updateDoc(root, { names }); },
+    async setNotifyTo(map) { await F.updateDoc(root, { notifyTo: map }); },   // お知らせメールの追加の宛先（メールアドレス → [宛先…]）。オーナーだけ   // 表示名（メールアドレス → 名前）。オーナーだけが変更できる
 
     // 曲（アップロードした音源の情報・ミックスの状態・バランス案）
     async getIdToken() { return auth.currentUser ? auth.currentUser.getIdToken() : ''; },

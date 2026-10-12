@@ -682,7 +682,9 @@ document.addEventListener('click', e => { if (!e.target.closest('.user')) { $('#
 let MEMBERS = { members: [], owner: '' };
 function renderMembers() {
   $('#memList').innerHTML = (MEMBERS.members || []).map(em => `<li class="mem"><div class="memrow"><span class="mail">${esc(em)}</span>${em === MEMBERS.owner ? '<span class="pill keep">オーナー</span>' : `<button class="btn" data-rm="${esc(em)}">外す</button>`}</div>
-    <form class="memname" data-email="${esc(em)}"><label>表示名<input value="${esc((MEMBERS.names || {})[em] || '')}" placeholder="空欄ならGoogleアカウントの名前" autocomplete="off"></label><button class="btn" type="submit">保存</button></form></li>`).join('');
+    <form class="memname" data-email="${esc(em)}"><label>表示名<input value="${esc((MEMBERS.names || {})[em] || '')}" placeholder="空欄ならGoogleアカウントの名前" autocomplete="off"></label><button class="btn" type="submit">保存</button></form>
+    <form class="memname memmail" data-email="${esc(em)}"><label>通知の追加先<input value="${esc(((MEMBERS.notifyTo || {})[em] || []).join(', '))}" placeholder="例：other@gmail.com（複数はカンマ区切り）" autocomplete="off" inputmode="email"></label><button class="btn" type="submit">保存</button></form>
+    <p class="memhint">📧 チャットのお知らせは「${esc(em)}」${((MEMBERS.notifyTo || {})[em] || []).length ? `と、追加先 ${((MEMBERS.notifyTo || {})[em] || []).length}件` : ''}に届きます</p></li>`).join('');
 }
 $('#membersBtn').addEventListener('click', () => { $('#userMenu').hidden = true; renderMembers(); $('#members').hidden = false; setTimeout(() => $('#memEmail').focus(), 0); });
 $('#memClose').addEventListener('click', () => { $('#members').hidden = true; });
@@ -694,6 +696,15 @@ $('#memAdd').addEventListener('submit', async e => {
 });
 $('#memList').addEventListener('submit', async e => {
   const f = e.target.closest('.memname'); if (!f) return; e.preventDefault();
+  if (f.classList.contains('memmail')) {   // お知らせメールの追加の宛先
+    const em = f.dataset.email, list = [...new Set(f.querySelector('input').value.split(/[,、\s]+/).map(x => x.trim().toLowerCase()).filter(Boolean))];
+    const bad = list.filter(x => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x));
+    if (bad.length) { toast('メールアドレスの形式を確認してください：' + bad.join(', ')); return; }
+    if (list.length > 4) { toast('追加の宛先は4件までです'); return; }
+    const map = { ...(MEMBERS.notifyTo || {}) }; if (list.length) map[em] = list.filter(x => x !== em); else delete map[em];
+    try { await store.setNotifyTo(map); toast(list.length ? `お知らせの追加先を保存しました（${list.length}件）` : 'お知らせの追加先を消しました'); } catch (err) { toast('保存できませんでした（オーナーだけが変更できます）'); }
+    return;
+  }
   const em = f.dataset.email, v = f.querySelector('input').value.trim().slice(0, 30), names = { ...(MEMBERS.names || {}) };
   if (v) names[em] = v; else delete names[em];
   try { await store.setNames(names); toast(v ? `表示名を「${v}」にしました` : '表示名を元に戻しました'); } catch (err) { toast('保存できませんでした（オーナーだけが変更できます）'); }

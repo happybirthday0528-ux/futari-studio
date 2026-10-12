@@ -23,7 +23,7 @@ $rate = $dir . '/rate_' . hash('sha256', $me['email']);
 if (is_file($rate) && filemtime($rate) > $now - 5) ok(['sent' => [], 'skipped' => 'rate']);
 touch($rate);
 
-list($members, $reads) = defined('TEST_MEMBERS') ? [TEST_MEMBERS, TEST_READS] : fs_members_and_reads($me['token']);
+list($members, $reads, $notifyTo) = defined('TEST_MEMBERS') ? [TEST_MEMBERS, TEST_READS, TEST_NOTIFYTO] : fs_members_and_reads($me['token']);
 
 // 相手ごとに「最後にメールを送った時刻」を記録しておくファイル
 $stateFile = $dir . '/state.json';
@@ -42,8 +42,9 @@ foreach ($members as $to) {
     $lastMail = isset($state[$key]) ? (int)$state[$key] : 0;
     $lastRead = isset($reads[$to]) ? (int)$reads[$to] : 0;
     if (!notify_should_send($lastMail, $lastRead, $now, NOTIFY_ACTIVE_SEC)) { $skipped[] = $lastRead > $now - NOTIFY_ACTIVE_SEC ? 'active' : 'unread'; continue; }
-    if (notify_send_mail($to, $subject, $body)) { $state[$key] = $now; $sent[] = 1; }
-    else $skipped[] = 'mail-error';
+    $ok = false;
+    foreach (notify_addresses($to, $notifyTo) as $addr) if (notify_send_mail($addr, $subject, $body)) { $ok = true; $sent[] = 1; }   // 追加の宛先にも同じメールを送る
+    if ($ok) $state[$key] = $now; else $skipped[] = 'mail-error';
 }
 
 ftruncate($fp, 0);

@@ -31,11 +31,12 @@ service cloud.firestore {
       allow create, update: if isOwner();
       allow delete: if false;
 
-      // チャット：自分の名前でだけ送れる。消せるのは自分のメッセージだけ
+      // チャット：自分の名前でだけ送れる。編集・取り消し・削除は自分のメッセージだけ
       match /chat/{id} {
         allow read: if isMember(sid);
         allow create: if isMember(sid) && request.resource.data.uid == request.auth.uid;
-        allow update: if false;
+        allow update: if isMember(sid) && resource.data.uid == request.auth.uid
+                      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['x', 'ref', 'edited', 'editedAt', 'unsent']);
         allow delete: if isMember(sid) && resource.data.uid == request.auth.uid;
       }
 

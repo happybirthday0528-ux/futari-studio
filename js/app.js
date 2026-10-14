@@ -403,6 +403,7 @@ const TABN = { orig: '原曲ボックス', lab: 'SUNOラボ', fin: '仕上げル
 const TABC = { orig: 'var(--p1)', lab: 'var(--p2)', fin: 'var(--p3)', pub: 'var(--p4)' };
 let CHAT = [], READS = { mine: 0, others: 0 }, pendRef = null;
 const OPEN_MSG = new Set();   // 「全文を表示」で開いている長文メッセージ
+let EDITING = null, EDIT_DRAFT = '', EDIT_CARET = null, MENU_OPEN = null, UNSEND_ARM = null, unsendTimer = 0;   // メッセージの編集・取り消し
 function refInfo(r) {
   if (r.k === 'cand') return { c: TABC.lab, l: `${cand(r.id).no} ▶ ${fmt(r.t)}` };
   if (r.k === 'ab') return { c: TABC.fin, l: `${r.tr ? 'B' : 'A'}：${r.name || (r.tr ? 'MIX v2' : 'SUNO #07')} ▶ ${fmt(r.t)}` };
@@ -418,10 +419,20 @@ function renderChat() {
     const mine = m.uid === ME.uid, cls = mine ? 'me' : 'pt', nm = dispName(m.uid, m.name), ini = esc((nm || '?').slice(0, 1));
     const read = mine && READS.others >= m.at ? '<span>既読</span>' : '';
     const long = (m.x || '').length > 400 || (m.x || '').split('\n').length > 10, open = OPEN_MSG.has(m.id);   // 長文は折りたたむ
-    html += `<div class="msg ${cls}"><span class="av ${cls}" title="${esc(nm)}">${ini}</span><div class="bub${long ? ' long' : ''}${open ? ' open' : ''}">${mine ? '' : `<div class="nm2">${esc(nm)}</div>`}<div class="txt">${esc(m.x)}</div>${long ? `<button type="button" class="more" data-more="${esc(m.id)}">${open ? '▲ 折りたたむ' : '▼ 全文を表示'}</button>` : ''}${m.ref ? refHtml(m.ref, m.id) : ''}</div><span class="mt2">${read}<span>${hmOf(m.at)}</span></span></div>`;
+    const id = esc(m.id), editing = mine && EDITING === m.id && !m.unsent;
+    let bub;
+    if (m.unsent) bub = `<div class="bub unsent"><div class="txt">🚫 ${mine ? '送信を取り消しました' : esc(nm) + 'さんが送信を取り消しました'}</div></div>`;
+    else if (editing) bub = `<div class="bub editing"><textarea class="edit" data-edit="${id}" aria-label="メッセージを編集"></textarea>${m.ref ? refHtml(m.ref, m.id) : ''}<div class="ebtns"><span class="note">Alt＋Enter で保存 ／ Esc でやめる</span><button type="button" class="btn" data-ecancel>やめる</button><button type="button" class="btn pri" data-esave="${id}">保存</button></div></div>`;
+    else bub = `<div class="bub${long ? ' long' : ''}${open ? ' open' : ''}">${mine ? '' : `<div class="nm2">${esc(nm)}</div>`}<div class="txt">${esc(m.x)}</div>${long ? `<button type="button" class="more" data-more="${id}">${open ? '▲ 折りたたむ' : '▼ 全文を表示'}</button>` : ''}${m.ref ? refHtml(m.ref, m.id) : ''}</div>`;
+    const menu = mine && !m.unsent && !editing
+      ? `<button type="button" class="mmenu" data-menu="${id}" aria-label="このメッセージを編集・取り消し" aria-expanded="${MENU_OPEN === m.id}">⋯</button>${MENU_OPEN === m.id ? `<span class="mmpop"><button type="button" data-act="edit" data-id="${id}">✏️ 編集</button><button type="button" data-act="unsend" data-id="${id}" class="${UNSEND_ARM === m.id ? 'armed' : ''}">${UNSEND_ARM === m.id ? 'もう一度押すと取り消します' : '🚫 送信を取り消す'}</button></span>` : ''}` : '';
+    html += `<div class="msg ${cls}"><span class="av ${cls}" title="${esc(nm)}">${ini}</span>${bub}<span class="mt2">${menu}${read}${m.edited && !m.unsent ? '<span>編集済み</span>' : ''}<span>${hmOf(m.at)}</span></span></div>`;
   });
   const b = $('#chatBody'); const atBottom = b.scrollHeight - b.scrollTop - b.clientHeight < 80;
-  b.innerHTML = html; if (atBottom || !renderChat.done) b.scrollTop = b.scrollHeight; renderChat.done = true;
+  const keep = b.scrollTop;
+  b.innerHTML = html; b.scrollTop = (atBottom || !renderChat.done) && !EDITING && !MENU_OPEN ? b.scrollHeight : keep; renderChat.done = true;
+  const ta = EDITING && b.querySelector('.edit');   // 編集中なら、書きかけの内容とカーソルを戻す
+  if (ta) { ta.value = EDIT_DRAFT; ta.style.height = Math.min(240, Math.max(60, ta.scrollHeight)) + 'px'; if (!renderChat.noFocus) { ta.focus(); ta.setSelectionRange(EDIT_CARET ?? ta.value.length, EDIT_CARET ?? ta.value.length); } }
   updBadge();
 }
 function updBadge() { const un = CHAT.filter(m => m.uid !== ME.uid && m.at > READS.mine).length; $('#badge').hidden = !un; $('#badge').textContent = un > 99 ? '99+' : un; }
@@ -449,6 +460,38 @@ $('#chatBody').addEventListener('click', e => {
   const id = mo.dataset.more; OPEN_MSG.has(id) ? OPEN_MSG.delete(id) : OPEN_MSG.add(id);
   const bub = mo.closest('.bub'), open = OPEN_MSG.has(id); bub.classList.toggle('open', open); mo.textContent = open ? '▲ 折りたたむ' : '▼ 全文を表示';
 });
+// 自分のメッセージの「⋯」メニュー（編集・送信の取り消し）
+$('#chatBody').addEventListener('click', async e => {
+  const mb = e.target.closest('[data-menu]');
+  if (mb) { const id = mb.dataset.menu; MENU_OPEN = MENU_OPEN === id ? null : id; UNSEND_ARM = null; renderChat(); return; }
+  const act = e.target.closest('[data-act]');
+  if (act) {
+    const id = act.dataset.id, m = CHAT.find(x => x.id === id); if (!m) return;
+    if (act.dataset.act === 'edit') { EDITING = id; EDIT_DRAFT = m.x || ''; EDIT_CARET = null; MENU_OPEN = null; renderChat(); return; }
+    if (UNSEND_ARM !== id) { UNSEND_ARM = id; renderChat(); clearTimeout(unsendTimer); unsendTimer = setTimeout(() => { if (UNSEND_ARM === id) { UNSEND_ARM = null; renderChat(); } }, 4000); return; }
+    UNSEND_ARM = null; MENU_OPEN = null;
+    try { await store.unsendChat(id); toast('送信を取り消しました'); } catch (err) { renderChat(); toast(chatEditError(err)); }
+    return;
+  }
+  if (e.target.closest('[data-ecancel]')) { EDITING = null; renderChat(); return; }
+  const sv = e.target.closest('[data-esave]'); if (sv) saveEdit(sv.dataset.esave);
+});
+const chatEditError = err => err && err.code === 'permission-denied' ? 'できませんでした。Firestoreのルールを新しいものに更新してください' : 'できませんでした。通信状況を確認してください';
+async function saveEdit(id) {
+  const m = CHAT.find(x => x.id === id); if (!m) return;
+  const x = EDIT_DRAFT.replace(/\s+$/, '');
+  if (!x.trim()) { toast('空にはできません。消したいときは「⋯」→「送信を取り消す」を使ってください'); return; }
+  EDITING = null;
+  if (x === m.x) { renderChat(); return; }
+  try { await store.editChat(id, x); toast('メッセージを編集しました'); } catch (err) { EDITING = id; renderChat(); toast(chatEditError(err)); }
+}
+$('#chatBody').addEventListener('input', e => { const t = e.target.closest('.edit'); if (!t) return; EDIT_DRAFT = t.value; EDIT_CARET = t.selectionStart; t.style.height = 'auto'; t.style.height = Math.min(240, Math.max(60, t.scrollHeight)) + 'px'; });
+$('#chatBody').addEventListener('keydown', e => {
+  const t = e.target.closest('.edit'); if (!t) return;
+  if (e.key === 'Enter' && e.altKey && !e.isComposing) { e.preventDefault(); saveEdit(t.dataset.edit); }
+  else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); EDITING = null; renderChat(); }   // チャットは閉じずに編集だけやめる
+});
+document.addEventListener('click', e => { if (MENU_OPEN && !e.target.closest('.mmenu,.mmpop')) { MENU_OPEN = null; UNSEND_ARM = null; renderChat(); } });
 $('#chatBody').addEventListener('click', e => { const b = e.target.closest('[data-ref]'); if (!b) return; const m = CHAT.find(x => x.id === b.dataset.ref); if (m && m.ref) openRef(m.ref, m); });
 // 送信は Alt＋Enter（Macは option＋Enter）。Enter だけなら改行（うっかり送信を防ぐ）
 $('#chatIn').addEventListener('keydown', e => { if (e.key === 'Enter' && e.altKey && !e.isComposing) { e.preventDefault(); $('#chatForm').requestSubmit(); } });

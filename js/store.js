@@ -48,6 +48,8 @@ function localStore(seed) {
     patchState(p) { D.state = { ...(D.state || {}), ...p }; persist(); },
     onChat(cb) { subs.chat.push(cb); cb(D.chat.slice()); return () => {}; },
     async sendChat(m) { D.chat.push({ id: newId(), uid: me.uid, name: me.name, at: Date.now(), ...m }); persist(); emit('chat'); },
+    async editChat(id, x) { const m = D.chat.find(c => c.id === id); if (m) Object.assign(m, { x, edited: true }); persist(); emit('chat'); },
+    async unsendChat(id) { const m = D.chat.find(c => c.id === id); if (m) Object.assign(m, { x: '', ref: null, unsent: true }); persist(); emit('chat'); },
     onReads(cb) { subs.reads.push(cb); emit('reads'); return () => {}; },
     markRead() { const last = D.chat.length ? D.chat[D.chat.length - 1].at : 0; if (last > (D.lastRead || 0)) { D.lastRead = last; persist(); emit('reads'); } },
     onMemos(cb) { subs.memos.push(cb); cb(sortMemos(D.memos)); return () => {}; },
@@ -141,6 +143,9 @@ async function firebaseStore(cfg) {
     async sendChat(m) {
       await F.addDoc(col('chat'), { uid: store.me.uid, name: store.me.name, x: m.x, ref: m.ref || null, at: F.serverTimestamp() });
     },
+    // 自分のメッセージの編集・送信の取り消し（取り消しは「取り消しました」の表示を残す）
+    async editChat(id, x) { await F.updateDoc(F.doc(db, 'studios', SID, 'chat', id), { x, edited: true, editedAt: F.serverTimestamp() }); },
+    async unsendChat(id) { await F.updateDoc(F.doc(db, 'studios', SID, 'chat', id), { x: '', ref: null, unsent: true, editedAt: F.serverTimestamp() }); },
     onReads(cb) {
       return keep(F.onSnapshot(col('reads'), s => {
         let mine = 0, others = 0; const emails = {};   // emails：uid → メールアドレス（表示名の対応に使う）

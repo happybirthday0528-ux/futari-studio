@@ -431,6 +431,7 @@ function renderChat() {
   const b = $('#chatBody'); const atBottom = b.scrollHeight - b.scrollTop - b.clientHeight < 80;
   const keep = b.scrollTop;
   b.innerHTML = html; b.scrollTop = (atBottom || !renderChat.done) && !EDITING && !MENU_OPEN ? b.scrollHeight : keep; renderChat.done = true;
+  placeMenu(); renderChat.at = performance.now();
   const ta = EDITING && b.querySelector('.edit');   // 編集中なら、書きかけの内容とカーソルを戻す
   if (ta) { ta.value = EDIT_DRAFT; ta.style.height = Math.min(240, Math.max(60, ta.scrollHeight)) + 'px'; if (!renderChat.noFocus) { ta.focus(); ta.setSelectionRange(EDIT_CARET ?? ta.value.length, EDIT_CARET ?? ta.value.length); } }
   updBadge();
@@ -476,6 +477,16 @@ $('#chatBody').addEventListener('click', async e => {
   if (e.target.closest('[data-ecancel]')) { EDITING = null; renderChat(); return; }
   const sv = e.target.closest('[data-esave]'); if (sv) saveEdit(sv.dataset.esave);
 });
+// 「⋯」メニューを、ボタンのそばで、かつ必ずチャット欄の中に収まる位置に出す
+function placeMenu() {
+  const pop = document.querySelector('#chatBody .mmpop'); if (!pop) return;
+  const btn = pop.parentElement.querySelector('.mmenu'), box = $('#chat').getBoundingClientRect(), r = btn.getBoundingClientRect();
+  const w = pop.offsetWidth, h = pop.offsetHeight, pad = 8;
+  const left = Math.max(box.left + pad, Math.min(r.right - w, box.right - w - pad));
+  let top = r.top - h - 4; if (top < box.top + 60) top = r.bottom + 4;   // 上に入らなければ下に出す
+  pop.style.left = left + 'px'; pop.style.top = Math.min(top, box.bottom - h - pad) + 'px'; pop.style.visibility = 'visible';
+}
+$('#chatBody').addEventListener('scroll', () => { if (MENU_OPEN && performance.now() - (renderChat.at || 0) > 300) { MENU_OPEN = null; UNSEND_ARM = null; renderChat(); } }, { passive: true });   // スクロールしたらメニューを閉じる
 const chatEditError = err => err && err.code === 'permission-denied' ? 'できませんでした。Firestoreのルールを新しいものに更新してください' : 'できませんでした。通信状況を確認してください';
 async function saveEdit(id) {
   const m = CHAT.find(x => x.id === id); if (!m) return;

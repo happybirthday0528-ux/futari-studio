@@ -113,6 +113,21 @@ async function decodePeaks(blob, n = 600) {   // WAV以外（MP3など）
     return { peaks, max, dur: buf.duration, sr: buf.sampleRate, ch: buf.numberOfChannels };
   } finally { ac.close && ac.close(); }
 }
+async function decodeToWav(blob, sr) {   // MP3などをWAV（16bit）に変換する（キーを変えるときに使う）
+  const AC = window.AudioContext || window.webkitAudioContext;
+  let ac; try { ac = new AC({ sampleRate: sr || 48000 }); } catch (e) { ac = new AC(); }
+  try {
+    const buf = await ac.decodeAudioData(await blob.arrayBuffer());
+    const ch = buf.numberOfChannels, n = buf.length, data = Array.from({ length: ch }, (_, c) => buf.getChannelData(c));
+    const out = new DataView(new ArrayBuffer(44 + n * ch * 2));
+    const wr = (o, x) => [...x].forEach((c, i) => out.setUint8(o + i, c.charCodeAt(0)));
+    wr(0, 'RIFF'); out.setUint32(4, 36 + n * ch * 2, true); wr(8, 'WAVE'); wr(12, 'fmt '); out.setUint32(16, 16, true); out.setUint16(20, 1, true);
+    out.setUint16(22, ch, true); out.setUint32(24, buf.sampleRate, true); out.setUint32(28, buf.sampleRate * ch * 2, true); out.setUint16(32, ch * 2, true); out.setUint16(34, 16, true);
+    wr(36, 'data'); out.setUint32(40, n * ch * 2, true);
+    for (let i = 0, o = 44; i < n; i++) for (let c = 0; c < ch; c++, o += 2) { const v = Math.max(-1, Math.min(1, data[c][i])); out.setInt16(o, v < 0 ? v * 32768 : v * 32767, true); }
+    return new Blob([out.buffer], { type: 'audio/wav' });
+  } finally { ac.close && ac.close(); }
+}
 // 波形を Firestore に保存するための変換（600個の数値 → 文字列）
 const packPeaks = p => { const u = new Uint8Array(p.length); p.forEach((v, i) => u[i] = Math.round(Math.min(1, v) * 255)); let s = ''; u.forEach(b => s += String.fromCharCode(b)); return btoa(s); };
 const unpackPeaks = s => { if (!s) return new Float32Array(600); const b = atob(s), f = new Float32Array(b.length); for (let i = 0; i < b.length; i++) f[i] = b.charCodeAt(i) / 255; return f; };
@@ -488,7 +503,7 @@ export function initMixer({ root, toast, onPlay }) {
     id: t.id, key: t.key || null, part: t.part, name: t.name, size: t.size || 0, dur: t.dur || 0, max: t.max || 0, midiOnly: !!t.midiOnly,
     sr: t.sr || null, bits: t.bits || null, ch: t.ch || null, float: !!t.float, peaks: t.peaks ? packPeaks(t.peaks) : null,
     midi: t.midi ? { key: t.midi.key || null, name: t.midi.name, size: t.midi.size } : null,
-    origKey: t.origKey || null, edits: t.edits || []   // キーを変えたときの、元の音源と変更の記録
+    origKey: t.origKey || null, origName: t.origName || null, edits: t.edits || []   // キーを変えたときの、元の音源と変更の記録
   });
   /* ---------- アップロード ---------- */
   async function upload() {
@@ -568,7 +583,7 @@ export function initMixer({ root, toast, onPlay }) {
   }
   /* ---------- キー（音の高さ）を変える ---------- */
   let PE = null;   // { id, from, to, semi }
-  const canPitch = t => !!t.blob && !t.error && (WAV_EXT.test(t.name) || /wav/i.test(t.blob.type || ''));
+  const canPitch = t => !!t.blob && !t.error && !t.midiOnly;   // MP3などは、最初の編集のときにWAVへ変換する
   const editedName = t => (t.edits || []).length ? t.name.replace(/(\.[^.]+)?$/, m => '（キー変更）' + (m || '.wav')) : t.name;
   const parseT = v => { const m = String(v).trim().match(/^(?:([0-9]+):)?([0-9]+(?:\.[0-9]+)?)$/); return m ? (+(m[1] || 0)) * 60 + (+m[2]) : NaN; };
   const fmtT = s => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`;
@@ -603,9 +618,17 @@ export function initMixer({ root, toast, onPlay }) {
     if (PE.to - PE.from < 0.1) { toast('範囲を選んでください（波形の上をドラッグ）'); return; }
     pause(); busy = true; renderPitch();
     try {
-      const w = await wavInfo(t.blob); if (!w) throw new Error('WAVを読み込めませんでした');
-      const nb = await pitchShiftRegion(t.blob, w, PE.from, PE.to, PE.semi, r => progress('キー（音の高さ）を変えています…', r));
-      (t.hist = t.hist || []).push({ blob: t.blob, keep: { peaks: t.peaks, max: t.max }, edits: [...(t.edits || [])], dirty: !!t.dirty });
+      let src = t.blob, w = await wavInfo(src), name = t.name;
+      if (!w) {   // MP3など → いったんWAVにしてから編集する（編集したパートはWAVで保存されます）
+        progress('WAVに変換しています…', 0);
+        src = await decodeToWav(t.blob, t.sr); w = await wavInfo(src);
+        if (!w) throw new Error('この音源を読み込めませんでした');
+        name = t.name.replace(/\.[^.]+$/, '') + '.wav';
+      }
+      const nb = await pitchShiftRegion(src, w, PE.from, PE.to, PE.semi, r => progress('キー（音の高さ）を変えています…', r));
+      (t.hist = t.hist || []).push({ blob: t.blob, keep: { peaks: t.peaks, max: t.max, name: t.name }, edits: [...(t.edits || [])], dirty: !!t.dirty });
+      if (name !== t.name && !t.origName) t.origName = t.name;   // 元のファイル名を覚えておく
+      t.name = name;
       await swapBlob(t, nb);
       t.edits = [...(t.edits || []), { from: +PE.from.toFixed(2), to: +PE.to.toFixed(2), semi: PE.semi }]; t.dirty = true;
       busy = false; progress(''); render();
@@ -624,8 +647,11 @@ export function initMixer({ root, toast, onPlay }) {
     busy = true;
     try {
       const nb = await downloadFile(cloud, SET.songId, t.origKey, () => {});
-      (t.hist = t.hist || []).push({ blob: t.blob, keep: { peaks: t.peaks, max: t.max }, edits: [...(t.edits || [])], dirty: !!t.dirty });
-      await swapBlob(t, nb); t.key = t.origKey; t.edits = []; t.dirty = false;
+      (t.hist = t.hist || []).push({ blob: t.blob, keep: { peaks: t.peaks, max: t.max, name: t.name }, edits: [...(t.edits || [])], dirty: !!t.dirty });
+      const w = await wavInfo(nb);
+      if (w) await swapBlob(t, nb); else await swapBlob(t, nb, await decodePeaks(nb).then(d => ({ peaks: d.peaks, max: d.max })));   // MP3のオリジナル
+      if (t.origName) t.name = t.origName;
+      t.key = t.origKey; t.edits = []; t.dirty = false;
       await cloud.store.updateSong(SET.songId, { tracks: SET.tracks.map(trackDoc) });
       toast('オリジナルの音源に戻しました（相方さんにも反映されます）');
     } catch (e) { toast('戻せませんでした：' + (e.message || e)); }

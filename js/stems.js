@@ -4,6 +4,7 @@
 //   ・ロリポップへのアップロード（api/upload.php）と、保存した曲の読み込み（api/file.php）
 //   ・ミックスの状態の自動保存、バランス案、今のバランスでのWAV書き出し
 // =====================================================================
+import { pitchShiftRegion } from './pitch.js';
 const JSZIP_URL = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
 const API = 'api/';
 const CHUNK = 4 * 1048576;          // アップロードは4MBずつ
@@ -324,6 +325,20 @@ export function initMixer({ root, toast, onPlay }) {
         <button class="btn" id="mxPresetNew" type="button">＋ 今のバランスを案として保存</button>
         <form class="mxpname" id="mxPresetForm" hidden><input id="mxPresetName" placeholder="例：ボーカル大きめ案" autocomplete="off" aria-label="バランス案の名前"><button class="btn pri" type="submit">保存</button><button class="btn" type="button" id="mxPresetCancel">やめる</button></form>
       </div>
+      <div class="mxpitch" id="mxPitch" hidden>
+        <div class="pth"><b>🎚 キー（音の高さ）を変える：<span id="pTrack"></span></b><button type="button" class="btn" id="pClose">閉じる</button></div>
+        <p class="note">そのパートの波形の上を<b>ドラッグして範囲を選ぶ</b>か、時間を入力してください。長さ・テンポは変わりません。<b>±3半音くらいまで</b>が自然に聞こえます。ほかのパートは変わりません。</p>
+        <div class="prow">
+          <label>開始 <input id="pFrom" class="mono" autocomplete="off" aria-label="開始時刻"></label>
+          <label>終了 <input id="pTo" class="mono" autocomplete="off" aria-label="終了時刻"></label>
+          <button type="button" class="btn" id="pAll">曲全体</button>
+          <span class="psemi"><button type="button" class="btn" data-semi="-1" aria-label="半音下げる">−</button><b id="pSemi">±0 半音</b><button type="button" class="btn" data-semi="1" aria-label="半音上げる">＋</button></span>
+          <button type="button" class="btn pri" id="pApply">適用して試聴</button>
+          <button type="button" class="btn" id="pUndo">ひとつ戻す</button>
+          <button type="button" class="btn" id="pOrig" hidden>オリジナルに戻す</button>
+        </div>
+        <div class="note" id="pStatus"></div>
+      </div>
       <div class="mxtracks" id="mxTracks"></div>
       <div class="mxfoot" id="mxFoot"></div>
     </div>`;
@@ -370,7 +385,7 @@ export function initMixer({ root, toast, onPlay }) {
   function clear(keep) {
     pause(); Object.values(els).forEach(a => { a.pause(); if (a.src) URL.revokeObjectURL(a.src); a.removeAttribute('src'); }); Object.keys(els).forEach(k => delete els[k]);
     if (SET) SET.tracks.forEach(t => { if (t.midi && t.midi.url) URL.revokeObjectURL(t.midi.url); });
-    SET = null; solo.clear(); mute.clear(); Object.keys(vol).forEach(k => delete vol[k]); pos = 0;
+    SET = null; PE = null; solo.clear(); mute.clear(); Object.keys(vol).forEach(k => delete vol[k]); pos = 0; $('#mxPitch', root).hidden = true;
     $('#mxBody', root).hidden = true; $('#mxClear', root).hidden = true; $('#mxDrop', root).classList.remove('small');
     if (!keep) { $('#mxSub', root).textContent = 'SUNOでダウンロードした一式を、パートごとに聴けます'; renderSongs(); }
   }
@@ -390,24 +405,26 @@ export function initMixer({ root, toast, onPlay }) {
       const opts = PARTS.map(x => `<option value="${x.key}"${x.key === t.part ? ' selected' : ''}>${esc(x.label)}</option>`).join('');
       if (t.midi && t.midi.blob && !t.midi.url) t.midi.url = URL.createObjectURL(t.midi.blob);
       return `<div class="trk${t.midiOnly ? ' midionly' : ''}${quiet ? ' quiet' : ''}" data-id="${t.id}" style="--tc:${p.color}">
-        <div class="tname"><i></i><select data-part aria-label="パートの種類">${opts}</select><small title="${esc(t.name)}">${esc(t.name)}</small></div>
+        <div class="tname"><i></i><select data-part aria-label="パートの種類">${opts}</select><small title="${esc(t.name)}">${esc(t.name)}</small>${(t.edits || []).length ? `<small class="pedits" title="キーを変えた範囲">🎚 ${t.edits.map(x => `${x.semi > 0 ? '+' : ''}${x.semi}（${fmt(x.from)}〜${fmt(x.to)}）`).join(' ・ ')}${t.dirty && s.songId ? ' ・未保存' : ''}</small>` : ''}</div>
         <div class="tbtns">${t.midiOnly ? '' : `<button type="button" class="ms" data-mute aria-pressed="false" title="ミュート">M</button><button type="button" class="ms" data-solo aria-pressed="false" title="ソロ">S</button><input type="range" min="0" max="1" step="0.01" value="${vol[t.id] ?? 1}" data-vol aria-label="${esc(p.label)}の音量">`}</div>
         <div class="twave">${t.midiOnly ? '<span class="note">MIDIだけ（音声なし）</span>' : '<canvas></canvas>'}</div>
-        <div class="tinfo">${t.midiOnly ? '' : `<span>${fmt(t.dur)}</span><span>${mb(t.size)}</span>`}${quiet ? '<span class="pill wait">ほぼ無音</span>' : ''}${t.error ? `<span class="pill wait">${esc(t.error)}</span>` : ''}${t.blob ? `<a class="btn mid" data-dl="${t.id}" href="#" title="${esc(t.name)} をダウンロード">WAV</a>` : ''}${t.midi && t.midi.url ? `<a class="btn mid" href="${t.midi.url}" download="${esc(t.midi.name)}" title="${esc(t.midi.name)} をダウンロード">MIDI</a>` : ''}</div>
+        <div class="tinfo">${t.midiOnly ? '' : `<span>${fmt(t.dur)}</span><span>${mb(t.size)}</span>`}${quiet ? '<span class="pill wait">ほぼ無音</span>' : ''}${t.error ? `<span class="pill wait">${esc(t.error)}</span>` : ''}${t.blob && canPitch(t) ? `<button type="button" class="btn mid pbtn${PE && PE.id === t.id ? ' on' : ''}" data-pitch="${t.id}" title="このパートの一部分のキー（音の高さ）を変える">🎚 キー</button>` : ''}${t.blob ? `<a class="btn mid" data-dl="${t.id}" href="#" title="${esc(editedName(t))} をダウンロード">WAV</a>` : ''}${t.midi && t.midi.url ? `<a class="btn mid" href="${t.midi.url}" download="${esc(t.midi.name)}" title="${esc(t.midi.name)} をダウンロード">MIDI</a>` : ''}</div>
       </div>`;
     }).join('');
     a.forEach(t => {
       if (t.error || !t.blob) return;
+      if (els[t.id]) return;   // 作り直し（キーの変更など）のときは、再生中の音をそのまま使う
       const el = new Audio(); el.preload = 'auto'; el.src = URL.createObjectURL(t.blob); els[t.id] = el;
       el.addEventListener('ended', () => { if (playing && t === master()) { pause(); pos = 0; draw(); } });
     });
-    $('#mxDur', root).textContent = fmt(s.dur); applyVol(); renderPresets(); renderFoot(); renderSongs(); draw();
+    $('#mxDur', root).textContent = fmt(s.dur); applyVol(); renderPresets(); renderFoot(); renderSongs(); renderPitch(); draw();
   }
   function renderFoot() {
     const f = $('#mxFoot', root); if (!SET) { f.innerHTML = ''; return; }
     const exp = `<button class="btn" id="mxExport" type="button" title="今の音量・ミュート・ソロのまま、1本のWAVにします">⤓ 今のバランスでWAV書き出し</button>`;
     const zip = `<button class="btn" id="mxZip" type="button" title="WAV・MIDIをまとめてZIPでダウンロード">⤓ 一式をZIPでダウンロード</button>`;
-    if (SET.songId) f.innerHTML = `${exp}${zip}<span class="spacer"></span><button class="btn danger" id="mxDelete" type="button">この曲を削除</button>`;
+    const dirty = SET.tracks.filter(t => t.dirty).length;
+    if (SET.songId) f.innerHTML = `${dirty ? `<button class="btn pri" id="mxSaveEdits" type="button">☁ キーの変更を保存して共有（${dirty}パート）</button>` : ''}${exp}${zip}<span class="spacer"></span><button class="btn danger" id="mxDelete" type="button">この曲を削除</button>`;
     else if (cloud && SET.pendingSong) f.innerHTML = `<button class="btn pri" id="mxUpload" type="button">☁ 曲の情報を保存し直す</button>${exp}<span class="note warn">⚠ 音源はサーバーに届いています。曲の情報（一覧に出すための情報）の保存だけ失敗しました。<b>このページを閉じずに</b>押してください</span>`;
     else if (cloud) f.innerHTML = `<button class="btn pri" id="mxUpload" type="button">☁ アップロードして相方さんと共有</button>${exp}<span class="note">アップロードすると、次からは「保存した曲」から開けます</span>`;
     else f.innerHTML = `${exp}<span class="note">アップロードは、ログインしているとき（本番モード）に使えます</span>`;
@@ -470,7 +487,8 @@ export function initMixer({ root, toast, onPlay }) {
   const trackDoc = t => ({
     id: t.id, key: t.key || null, part: t.part, name: t.name, size: t.size || 0, dur: t.dur || 0, max: t.max || 0, midiOnly: !!t.midiOnly,
     sr: t.sr || null, bits: t.bits || null, ch: t.ch || null, float: !!t.float, peaks: t.peaks ? packPeaks(t.peaks) : null,
-    midi: t.midi ? { key: t.midi.key || null, name: t.midi.name, size: t.midi.size } : null
+    midi: t.midi ? { key: t.midi.key || null, name: t.midi.name, size: t.midi.size } : null,
+    origKey: t.origKey || null, edits: t.edits || []   // キーを変えたときの、元の音源と変更の記録
   });
   /* ---------- アップロード ---------- */
   async function upload() {
@@ -505,6 +523,7 @@ export function initMixer({ root, toast, onPlay }) {
       await cloud.store.saveSong(song, { title: SET.title, bpm: SET.bpm || null, dur: SET.dur, tracks: SET.tracks.map(trackDoc), mix: mixState(), presets: [] });
       delete SET.pendingSong;
       SET.songId = song; SET.createdByName = cloud.me && cloud.me.name; SET.createdAt = Date.now();
+      SET.tracks.forEach(t => { t.dirty = false; });   // キーを変えた音も、いまアップロードした中に入っている
       toast(`「${SET.title}」をアップロードしました。相方さんも一覧から開けます`);
       render();
     } catch (e) {
@@ -512,7 +531,7 @@ export function initMixer({ root, toast, onPlay }) {
       SET.pendingSong = song;   // 音源はサーバーに届いている。情報だけ保存し直せるようにする
       toast('音源のアップロードは完了しましたが、曲の情報を保存できませんでした（' + (e.code || e.message || e) + '）。Firestoreのルールを確認して「曲の情報を保存し直す」を押してください');
       renderFoot();
-    } finally { busy = false; progress(''); renderSongs(); }
+    } finally { busy = false; progress(''); renderSongs(); renderPitch(); }
   }
   async function deleteSong() {
     if (!SET || !SET.songId || !cloud) return;
@@ -541,12 +560,108 @@ export function initMixer({ root, toast, onPlay }) {
     try {
       progress('ZIPを作っています…', 0);
       const JSZip = await loadJSZip(), zip = new JSZip(), dir = safeName(SET.title) + (SET.bpm ? ` (${SET.bpm}BPM)` : '');
-      SET.tracks.forEach(t => { if (t.blob) zip.file(`${dir}/Stems/${t.name}`, t.blob); if (t.midi && t.midi.blob) zip.file(`${dir}/MIDI/${t.midi.name}`, t.midi.blob); });
+      SET.tracks.forEach(t => { if (t.blob) zip.file(`${dir}/Stems/${editedName(t)}`, t.blob); if (t.midi && t.midi.blob) zip.file(`${dir}/MIDI/${t.midi.name}`, t.midi.blob); });
       const blob = await zip.generateAsync({ type: 'blob', compression: 'STORE' }, m => progress('ZIPを作っています…', m.percent / 100));
       saveBlob(blob, dir + '.zip');
     } catch (e) { toast('ZIPを作れませんでした：' + (e.message || e)); }
     finally { busy = false; progress(''); }
   }
+  /* ---------- キー（音の高さ）を変える ---------- */
+  let PE = null;   // { id, from, to, semi }
+  const canPitch = t => !!t.blob && !t.error && (WAV_EXT.test(t.name) || /wav/i.test(t.blob.type || ''));
+  const editedName = t => (t.edits || []).length ? t.name.replace(/(\.[^.]+)?$/, m => '（キー変更）' + (m || '.wav')) : t.name;
+  const parseT = v => { const m = String(v).trim().match(/^(?:([0-9]+):)?([0-9]+(?:\.[0-9]+)?)$/); return m ? (+(m[1] || 0)) * 60 + (+m[2]) : NaN; };
+  const fmtT = s => `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, '0')}`;
+  function openPitch(id) {
+    const t = SET && SET.tracks.find(x => x.id === id); if (!t) return;
+    if (PE && PE.id === id) { PE = null; render(); return; }   // もう一度押したら閉じる
+    PE = { id, from: Math.min(pos, Math.max(0, SET.dur - 1)), to: Math.min(SET.dur, pos + 15), semi: PE ? PE.semi : 0 };
+    render(); $('#mxPitch', root).scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+  function renderPitch() {
+    const p = $('#mxPitch', root); p.hidden = !PE || !SET; if (p.hidden) return;
+    const t = SET.tracks.find(x => x.id === PE.id); if (!t) { PE = null; p.hidden = true; return; }
+    $('#pTrack', root).textContent = partOf(t.part).label;
+    if (document.activeElement !== $('#pFrom', root)) $('#pFrom', root).value = fmtT(PE.from);
+    if (document.activeElement !== $('#pTo', root)) $('#pTo', root).value = fmtT(PE.to);
+    $('#pSemi', root).textContent = (PE.semi > 0 ? '+' : PE.semi < 0 ? '−' : '±') + Math.abs(PE.semi) + ' 半音';
+    $('#pSemi', root).className = Math.abs(PE.semi) > 3 ? 'warn' : '';
+    $('#pApply', root).disabled = busy || !PE.semi;
+    $('#pUndo', root).disabled = busy || !(t.hist && t.hist.length);
+    $('#pOrig', root).hidden = !(t.origKey && SET.songId && cloud && t.key !== t.origKey);
+    $('#pStatus', root).textContent = Math.abs(PE.semi) > 3 ? '⚠ 3半音より大きく動かすと、声がこもったりケロケロしたりしやすくなります' : `選んだ範囲：${fmtT(PE.from)} 〜 ${fmtT(PE.to)}（${(PE.to - PE.from).toFixed(1)}秒）`;
+  }
+  async function swapBlob(t, nb, keep) {   // パートの音を差し替える（再生中の位置はそのまま）
+    t.blob = nb; t.size = nb.size;
+    if (keep) Object.assign(t, keep); else { const w = await wavInfo(nb); Object.assign(t, await wavPeaks(nb, w)); }
+    const el = els[t.id];
+    if (el) { const old = el.src, at = el.currentTime, was = !el.paused; el.src = URL.createObjectURL(nb); URL.revokeObjectURL(old); try { el.currentTime = at; } catch (e) {} if (was) el.play().catch(() => {}); applyVol(); }
+  }
+  async function applyPitch() {
+    const t = SET && PE && SET.tracks.find(x => x.id === PE.id); if (!t || busy) return;
+    if (!PE.semi) { toast('上げる・下げる量（半音）を選んでください'); return; }
+    if (PE.to - PE.from < 0.1) { toast('範囲を選んでください（波形の上をドラッグ）'); return; }
+    pause(); busy = true; renderPitch();
+    try {
+      const w = await wavInfo(t.blob); if (!w) throw new Error('WAVを読み込めませんでした');
+      const nb = await pitchShiftRegion(t.blob, w, PE.from, PE.to, PE.semi, r => progress('キー（音の高さ）を変えています…', r));
+      (t.hist = t.hist || []).push({ blob: t.blob, keep: { peaks: t.peaks, max: t.max }, edits: [...(t.edits || [])], dirty: !!t.dirty });
+      await swapBlob(t, nb);
+      t.edits = [...(t.edits || []), { from: +PE.from.toFixed(2), to: +PE.to.toFixed(2), semi: PE.semi }]; t.dirty = true;
+      busy = false; progress(''); render();
+      toast(`${partOf(t.part).label} の ${fmt(PE.from)}〜${fmt(PE.to)} を ${PE.semi > 0 ? '+' : ''}${PE.semi} 半音にしました。伴奏と一緒に再生します`);
+      seek(Math.max(0, PE.from - 2)); play();
+    } catch (e) { console.error(e); toast('キーを変えられませんでした：' + (e.message || e)); }
+    finally { busy = false; progress(''); renderPitch(); renderFoot(); }
+  }
+  async function undoPitch() {
+    const t = SET && PE && SET.tracks.find(x => x.id === PE.id); if (!t || !t.hist || !t.hist.length || busy) return;
+    const h = t.hist.pop(); await swapBlob(t, h.blob, h.keep); t.edits = h.edits; t.dirty = SET.songId ? true : h.dirty;
+    render(); toast('ひとつ前の状態に戻しました');
+  }
+  async function origPitch() {   // サーバーにあるオリジナルの音源に戻す
+    const t = SET && PE && SET.tracks.find(x => x.id === PE.id); if (!t || !t.origKey || !cloud || busy) return;
+    busy = true;
+    try {
+      const nb = await downloadFile(cloud, SET.songId, t.origKey, () => {});
+      (t.hist = t.hist || []).push({ blob: t.blob, keep: { peaks: t.peaks, max: t.max }, edits: [...(t.edits || [])], dirty: !!t.dirty });
+      await swapBlob(t, nb); t.key = t.origKey; t.edits = []; t.dirty = false;
+      await cloud.store.updateSong(SET.songId, { tracks: SET.tracks.map(trackDoc) });
+      toast('オリジナルの音源に戻しました（相方さんにも反映されます）');
+    } catch (e) { toast('戻せませんでした：' + (e.message || e)); }
+    finally { busy = false; render(); }
+  }
+  async function saveEdits() {   // キーを変えたパートをアップロードして、相方さんと共有
+    if (!SET || !SET.songId || !cloud || busy) return;
+    const list = SET.tracks.filter(t => t.dirty && t.blob); if (!list.length) return;
+    pause(); busy = true;
+    try {
+      const total = list.reduce((n, t) => n + t.blob.size, 0); let sent = 0;
+      for (const t of list) {
+        const idx = SET.tracks.indexOf(t), key = `a${idx}_k${Date.now().toString(36)}.${extOf(t.name)}`;
+        await uploadFile(cloud, SET.songId, key, t.blob, n => { sent += n; progress(`キーを変えたパートを保存しています… ${mb(sent)} / ${mb(total)}`, sent / total); });
+        cachePut(fileUrl(SET.songId, key), t.blob);
+        if (!t.origKey) t.origKey = t.key;   // 最初のオリジナルを覚えておく
+        t.key = key; t.dirty = false;
+      }
+      await cloud.store.updateSong(SET.songId, { tracks: SET.tracks.map(trackDoc) });
+      toast('キーの変更を保存しました。相方さんも同じ音で聴けます');
+    } catch (e) { console.error(e); toast('保存できませんでした：' + (e.message || e)); }
+    finally { busy = false; progress(''); render(); }
+  }
+  $('#pClose', root).addEventListener('click', () => { PE = null; render(); });
+  $('#pAll', root).addEventListener('click', () => { if (!PE) return; PE.from = 0; PE.to = SET.dur; renderPitch(); draw(); });
+  $('#mxPitch', root).addEventListener('click', e => { const b = e.target.closest('[data-semi]'); if (!b || !PE) return; PE.semi = Math.max(-12, Math.min(12, PE.semi + (+b.dataset.semi))); renderPitch(); });
+  ['pFrom', 'pTo'].forEach(id => $('#' + id, root).addEventListener('change', e => {
+    if (!PE) return; const v = parseT(e.target.value);
+    if (isNaN(v)) { toast('時間は「1:52.5」のように入力してください'); renderPitch(); return; }
+    const c = Math.max(0, Math.min(SET.dur, v)); if (id === 'pFrom') PE.from = c; else PE.to = c;
+    if (PE.from > PE.to) [PE.from, PE.to] = [PE.to, PE.from]; renderPitch(); draw();
+  }));
+  $('#pApply', root).addEventListener('click', applyPitch);
+  $('#pUndo', root).addEventListener('click', undoPitch);
+  $('#pOrig', root).addEventListener('click', origPitch);
+
   /* ---------- 再生 ---------- */
   function play() {
     if (!SET || playing || !master()) return; onPlay && onPlay();
@@ -574,6 +689,11 @@ export function initMixer({ root, toast, onPlay }) {
       const col = partOf(t.part).color, n = t.peaks.length, bw = w / n, mid = h / 2, prog = SET.dur ? pos / SET.dur : 0;
       const scale = t.max > 0 ? Math.min(1 / t.max, 1 / 0.02) : 1;   // 小さい音のパートも形が見えるように拡大
       for (let i = 0; i < n; i++) { const a = Math.min(1, t.peaks[i] * scale) * (mid - 2); c.globalAlpha = (i + .5) / n <= prog ? 1 : .38; c.fillStyle = col; c.fillRect(i * bw, mid - a, Math.max(1, bw - .4), Math.max(1, a * 2)); }
+      if (PE && PE.id === t.id && PE.to > PE.from) {   // キーを変える範囲
+        const x0 = PE.from / SET.dur * w, x1 = PE.to / SET.dur * w;
+        c.globalAlpha = .22; c.fillStyle = '#F2A93B'; c.fillRect(x0, 0, x1 - x0, h);
+        c.globalAlpha = 1; c.fillRect(x0, 0, 1.5, h); c.fillRect(x1 - 1.5, 0, 1.5, h);
+      }
       c.globalAlpha = 1; c.fillStyle = '#E7E9EF'; if (prog > 0) c.fillRect(Math.min(w - 2, prog * w - 1), 0, 2, h);
     });
   }
@@ -590,10 +710,25 @@ export function initMixer({ root, toast, onPlay }) {
   tracksEl.addEventListener('click', e => {
     const row = e.target.closest('.trk'); if (!row || !SET) return; const id = row.dataset.id;
     const dl = e.target.closest('[data-dl]');
-    if (dl) { e.preventDefault(); const t = SET.tracks.find(x => x.id === dl.dataset.dl); if (t && t.blob) saveBlob(t.blob, t.name); return; }
+    if (dl) { e.preventDefault(); const t = SET.tracks.find(x => x.id === dl.dataset.dl); if (t && t.blob) saveBlob(t.blob, editedName(t)); return; }
     if (e.target.closest('[data-mute]')) { mute.has(id) ? mute.delete(id) : mute.add(id); applyVol(); changed('mix'); }
     else if (e.target.closest('[data-solo]')) { if (e.shiftKey || e.ctrlKey || e.metaKey) { solo.has(id) ? solo.delete(id) : solo.add(id); } else { const only = solo.size === 1 && solo.has(id); solo.clear(); if (!only) solo.add(id); } applyVol(); changed('mix'); }
-    else if (e.target.tagName === 'CANVAS') { const r = e.target.getBoundingClientRect(); seek((e.clientX - r.left) / r.width * SET.dur); }
+    else if (e.target.closest('[data-pitch]')) openPitch(e.target.closest('[data-pitch]').dataset.pitch);
+    else if (e.target.tagName === 'CANVAS') { if (PE && PE.id === id && pickMoved) return; const r = e.target.getBoundingClientRect(); seek((e.clientX - r.left) / r.width * SET.dur); }
+  });
+  // キーの編集中は、そのパートの波形をドラッグして範囲を選ぶ（少ししか動かさなければ、ふつうのクリック＝再生位置の移動）
+  let pickMoved = false;
+  tracksEl.addEventListener('pointerdown', e => {
+    const row = e.target.closest('.trk'); if (!row || !PE || row.dataset.id !== PE.id || e.target.tagName !== 'CANVAS' || e.button !== 0) return;
+    const cv = e.target, r = cv.getBoundingClientRect(), t0 = (e.clientX - r.left) / r.width * SET.dur, sx = e.clientX; pickMoved = false;
+    cv.setPointerCapture(e.pointerId);
+    const mv = ev => {
+      if (Math.abs(ev.clientX - sx) < 4 && !pickMoved) return; pickMoved = true;
+      const t1 = Math.max(0, Math.min(SET.dur, (ev.clientX - r.left) / r.width * SET.dur));
+      PE.from = Math.min(t0, t1); PE.to = Math.max(t0, t1); renderPitch(); draw();
+    };
+    const up = () => { cv.removeEventListener('pointermove', mv); cv.removeEventListener('pointerup', up); cv.removeEventListener('pointercancel', up); setTimeout(() => { pickMoved = false; }, 0); };
+    cv.addEventListener('pointermove', mv); cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
   });
   tracksEl.addEventListener('input', e => { const row = e.target.closest('.trk'); if (row && e.target.matches('[data-vol]')) { vol[row.dataset.id] = +e.target.value; applyVol(); changed('mix'); } });
   tracksEl.addEventListener('dblclick', e => { const row = e.target.closest('.trk'); if (row && e.target.matches('[data-vol]')) { vol[row.dataset.id] = 1; applyVol(); changed('mix'); } });   // ダブルクリックで元の音量
@@ -606,6 +741,7 @@ export function initMixer({ root, toast, onPlay }) {
   $('#mxFoot', root).addEventListener('click', e => {
     const b = e.target.closest('button'); if (!b) return;
     if (b.id === 'mxUpload') upload();
+    else if (b.id === 'mxSaveEdits') saveEdits();
     else if (b.id === 'mxExport') exportMix();
     else if (b.id === 'mxZip') exportZip();
     else if (b.id === 'mxDelete') {
@@ -642,6 +778,6 @@ export function initMixer({ root, toast, onPlay }) {
   ['dragleave', 'drop'].forEach(ev => root.addEventListener(ev, e => { if (ev === 'dragleave' && root.contains(e.relatedTarget)) return; root.classList.remove('dragover'); }));
   root.addEventListener('drop', async e => { e.preventDefault(); load(await fromDataTransfer(e.dataTransfer)); });
   window.addEventListener('resize', () => draw());
-  window.addEventListener('beforeunload', e => { if (busy || (SET && SET.pendingSong)) { e.preventDefault(); e.returnValue = ''; } });   // アップロード中に閉じそうになったら確認
+  window.addEventListener('beforeunload', e => { if (busy || (SET && (SET.pendingSong || (SET.songId && SET.tracks.some(t => t.dirty))))) { e.preventDefault(); e.returnValue = ''; } });   // アップロード中に閉じそうになったら確認
   return m;
 }

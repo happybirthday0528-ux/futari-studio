@@ -436,6 +436,22 @@ kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-b
 .mvf .btn.pri{--ac:var(--p2)}
 @media (max-width:720px){.mview{inset:0!important;width:100%!important;height:100%!important;border-radius:0;resize:none;max-width:none;max-height:none}.mvh{cursor:default}}
 
+/* キー（音の高さ）を変えるパネル */
+.mxpitch{margin-bottom:10px;padding:12px 14px;background:color-mix(in srgb,var(--p3) 8%,var(--bg));border:1px solid color-mix(in srgb,var(--p3) 50%,transparent);border-radius:10px;display:flex;flex-direction:column;gap:8px}
+.mxpitch .pth{display:flex;align-items:center;gap:10px;justify-content:space-between}
+.mxpitch .pth b{color:var(--p3)}
+.mxpitch p{margin:0}
+.mxpitch .prow{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.mxpitch label{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mute)}
+.mxpitch label input{width:84px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:5px 8px;color:var(--fg);font-size:13px}
+.psemi{display:inline-flex;align-items:center;gap:4px;padding:2px;border:1px solid var(--line);border-radius:8px;background:var(--panel2)}
+.psemi .btn{width:32px;justify-content:center;padding:4px 0;font-size:16px;font-weight:700}
+.psemi b{min-width:78px;text-align:center;font-family:var(--mono);font-size:14px;color:var(--p3)}
+.psemi b.warn{color:var(--warn)}
+.mxpitch .btn.pri{--ac:var(--p3)}
+.btn.pbtn.on{background:var(--p3);border-color:var(--p3);color:#1a1205}
+.tname small.pedits{color:var(--p3);white-space:normal}
+
 /* gate & modal */
 .gate{position:fixed;inset:0;z-index:40;background:var(--bg);display:grid;place-items:center;padding:16px}
 .gbox{width:min(420px,100%);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:28px 24px;display:flex;flex-direction:column;gap:14px;text-align:center;align-items:center}

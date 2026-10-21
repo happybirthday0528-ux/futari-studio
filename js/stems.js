@@ -342,7 +342,9 @@ export function initMixer({ root, toast, onPlay }) {
       </div>
       <div class="mxpitch" id="mxPitch" hidden>
         <div class="pth"><b>🎚 キー（音の高さ）を変える：<span id="pTrack"></span></b><button type="button" class="btn" id="pClose">閉じる</button></div>
-        <p class="note">そのパートの波形の上を<b>ドラッグして範囲を選ぶ</b>か、時間を入力してください。長さ・テンポは変わりません。<b>±3半音くらいまで</b>が自然に聞こえます。ほかのパートは変わりません。</p>
+        <p class="note"><b>Shift＋ドラッグで範囲を選び</b>、選んだ部分を<b>上下にドラッグ</b>するとキーが変わります（離すと適用して試聴）。長さ・テンポは変わりません。<b>±3半音くらいまで</b>が自然に聞こえます。ほかのパートは変わりません。</p>
+        <div class="pwave"><canvas id="pCanvas"></canvas></div>
+        <div class="pzoom"><span class="note">ホイール：拡大・縮小 ／ ドラッグ：左右に移動 ／ クリック：その位置へ</span><span class="spacer"></span><button type="button" class="btn" data-zoom="in">＋ 拡大</button><button type="button" class="btn" data-zoom="out">− 縮小</button><button type="button" class="btn" data-zoom="sel">選んだ範囲を拡大</button><button type="button" class="btn" data-zoom="all">全体を表示</button></div>
         <div class="prow">
           <label>開始 <input id="pFrom" class="mono" autocomplete="off" aria-label="開始時刻"></label>
           <label>終了 <input id="pTo" class="mono" autocomplete="off" aria-label="終了時刻"></label>
@@ -591,6 +593,7 @@ export function initMixer({ root, toast, onPlay }) {
     const t = SET && SET.tracks.find(x => x.id === id); if (!t) return;
     if (PE && PE.id === id) { PE = null; render(); return; }   // もう一度押したら閉じる
     PE = { id, from: Math.min(pos, Math.max(0, SET.dur - 1)), to: Math.min(SET.dur, pos + 15), semi: PE ? PE.semi : 0 };
+    PV.v0 = Math.max(0, pos - 5); PV.v1 = Math.min(SET.dur, PV.v0 + 30); if (PV.v1 - PV.v0 < 30) PV.v0 = Math.max(0, PV.v1 - 30);   // 大きい波形は30秒ぶんを表示
     render(); $('#mxPitch', root).scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
   function renderPitch() {
@@ -634,6 +637,7 @@ export function initMixer({ root, toast, onPlay }) {
       busy = false; progress(''); render();
       toast(`${partOf(t.part).label} の ${fmt(PE.from)}〜${fmt(PE.to)} を ${PE.semi > 0 ? '+' : ''}${PE.semi} 半音にしました。伴奏と一緒に再生します`);
       seek(Math.max(0, PE.from - 2)); play();
+      return true;
     } catch (e) { console.error(e); toast('キーを変えられませんでした：' + (e.message || e)); }
     finally { busy = false; progress(''); renderPitch(); renderFoot(); }
   }
@@ -688,6 +692,121 @@ export function initMixer({ root, toast, onPlay }) {
   $('#pUndo', root).addEventListener('click', undoPitch);
   $('#pOrig', root).addEventListener('click', origPitch);
 
+  /* ---------- 大きい波形で、範囲を選んで上下にドラッグ ---------- */
+  const PV = { v0: 0, v1: 30 };   // 表示している時間の範囲（秒）
+  let HP = null, hpJob = null;     // 細かい波形 { t, blob, peaks, rate, max }
+  let PD = null;                   // ドラッグ中の状態 { mode: 'select' | 'shift' | 'pan', semi }
+  const SEMI_VIEW = 6;             // 上下に ±6 半音ぶんの目盛り
+  function hiPeaks(t) {   // 1秒あたり200個の細かい波形を作る（パートの音が変わったら作り直す）
+    if (HP && HP.t === t && HP.blob === t.blob) return HP;
+    if (hpJob && hpJob.blob === t.blob) return null;
+    const blob = t.blob, job = hpJob = { blob };
+    (async () => {
+      const w = await wavInfo(blob), dur = w ? w.frames / w.sr : t.dur, n = Math.max(600, Math.ceil(dur * 200));
+      const r = w ? await wavPeaks(blob, w, n) : await decodePeaks(blob, n);
+      if (hpJob !== job) return;
+      HP = { t, blob, peaks: r.peaks, rate: n / dur, max: r.max }; hpJob = null; drawPE();
+    })().catch(e => { console.error(e); if (hpJob === job) hpJob = null; });
+    return null;
+  }
+  const pcv = $('#pCanvas', root);
+  const xToT = x => PV.v0 + x / pcv.clientWidth * (PV.v1 - PV.v0);
+  const tToX = t => (t - PV.v0) / (PV.v1 - PV.v0) * pcv.clientWidth;
+  const semiPx = () => (pcv.clientHeight - 30) / 2 / SEMI_VIEW;
+  function setView(a, b) {
+    const d = SET.dur, len = Math.max(1, Math.min(d, b - a));
+    a = Math.max(0, Math.min(d - len, a)); PV.v0 = a; PV.v1 = a + len; drawPE();
+  }
+  function drawPE() {
+    if (!PE || !SET || $('#mxPitch', root).hidden) return;
+    const t = SET.tracks.find(x => x.id === PE.id); if (!t) return;
+    const dpr = window.devicePixelRatio || 1, w = pcv.clientWidth, h = pcv.clientHeight; if (!w) return;
+    if (pcv.width !== Math.round(w * dpr) || pcv.height !== Math.round(h * dpr)) { pcv.width = Math.round(w * dpr); pcv.height = Math.round(h * dpr); }
+    const c = pcv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, w, h);
+    const H = h - 18, mid = H / 2, sp = semiPx(), col = partOf(t.part).color, hp = hiPeaks(t);
+    // 半音の目盛り
+    c.font = '10px ' + getComputedStyle(root).getPropertyValue('--mono'); c.textBaseline = 'middle';
+    for (let k = -SEMI_VIEW; k <= SEMI_VIEW; k++) {
+      const y = mid - k * sp; c.fillStyle = k === 0 ? 'rgba(231,233,239,.22)' : 'rgba(231,233,239,.07)'; c.fillRect(0, Math.round(y), w, 1);
+    }
+    // キーを変えた範囲（記録）
+    (t.edits || []).forEach(e => {
+      const x0 = tToX(e.from), x1 = tToX(e.to); if (x1 < 0 || x0 > w) return;
+      c.fillStyle = 'rgba(242,169,59,.10)'; c.fillRect(x0, 0, x1 - x0, H);
+      c.fillStyle = '#F2A93B'; c.fillRect(x0, 0, x1 - x0, 3); c.fillText(`${e.semi > 0 ? '+' : ''}${e.semi}`, Math.max(2, x0 + 3), 10);
+    });
+    // 選んだ範囲
+    const s0 = tToX(PE.from), s1 = tToX(PE.to), semi = PD && PD.mode === 'shift' ? PD.semi : 0;
+    if (PE.to > PE.from) { c.fillStyle = 'rgba(242,169,59,.16)'; c.fillRect(s0, 0, s1 - s0, H); c.fillStyle = '#F2A93B'; c.fillRect(s0, 0, 1.5, H); c.fillRect(s1 - 1.5, 0, 1.5, H); }
+    // 波形
+    const peaks = hp ? hp.peaks : t.peaks, rate = hp ? hp.rate : t.peaks.length / (t.dur || SET.dur || 1), mx = hp ? hp.max : t.max;
+    const scale = mx > 0 ? Math.min(1 / mx, 1 / 0.02) : 1, amp = Math.min(mid - 4, sp * 3.2), prog = pos;
+    for (let x = 0; x < w; x++) {
+      const ta = xToT(x), tb = xToT(x + 1); let i0 = Math.floor(ta * rate), i1 = Math.max(i0 + 1, Math.floor(tb * rate)), v = 0;
+      for (let i = Math.max(0, i0); i < Math.min(peaks.length, i1); i++) if (peaks[i] > v) v = peaks[i];
+      const a = Math.min(1, v * scale) * amp; if (a <= 0) continue;
+      const inSel = semi && ta >= PE.from && tb <= PE.to;
+      if (inSel) { c.globalAlpha = .18; c.fillStyle = col; c.fillRect(x, mid - a, 1, a * 2); }   // 元の位置（うすく）
+      c.globalAlpha = ta <= prog ? 1 : .55; c.fillStyle = inSel ? '#F2A93B' : col;
+      c.fillRect(x, mid - a - (inSel ? semi * sp : 0), 1, Math.max(1, a * 2));
+    }
+    c.globalAlpha = 1;
+    if (semi) {   // ドラッグ中の量
+      const lx = Math.max(4, Math.min(w - 120, (s0 + s1) / 2 - 50)), ly = Math.max(14, Math.min(H - 14, mid - semi * sp));
+      c.fillStyle = 'rgba(14,16,20,.85)'; c.fillRect(lx, ly - 13, 104, 26);
+      c.font = 'bold 14px ' + getComputedStyle(root).getPropertyValue('--mono'); c.fillStyle = Math.abs(semi) > 3 ? '#F06B6B' : '#F2A93B';
+      c.fillText(`${semi > 0 ? '+' : '−'}${Math.abs(semi)} 半音`, lx + 10, ly + 1);
+      c.font = '10px ' + getComputedStyle(root).getPropertyValue('--mono');
+    }
+    // 再生位置
+    const px = tToX(pos); if (px >= 0 && px <= w) { c.fillStyle = '#E7E9EF'; c.fillRect(px - 1, 0, 2, H); }
+    // 時間の目盛り
+    const span = PV.v1 - PV.v0, step = [0.5, 1, 2, 5, 10, 15, 30, 60].find(s => span / s <= w / 70) || 60;
+    c.fillStyle = 'rgba(139,145,161,.9)'; c.textBaseline = 'alphabetic';
+    for (let tt = Math.ceil(PV.v0 / step) * step; tt <= PV.v1; tt += step) { const x = tToX(tt); c.fillRect(x, H, 1, 4); c.fillText(fmtT(tt).replace(/\.0$/, ''), x + 3, h - 2); }
+  }
+  pcv.addEventListener('pointermove', e => {   // マウスの形で、できることを知らせる
+    if (PD || !PE) return; const tt = xToT(e.offsetX);
+    pcv.style.cursor = e.shiftKey ? 'crosshair' : tt >= PE.from && tt <= PE.to && PE.to > PE.from ? 'ns-resize' : 'grab';
+  });
+  pcv.addEventListener('pointerdown', e => {
+    if (!PE || !SET || e.button !== 0 || busy) return;
+    const sx = e.clientX, sy = e.clientY, t0 = Math.max(0, Math.min(SET.dur, xToT(e.offsetX))), v0 = PV.v0, v1 = PV.v1;
+    const mode = e.shiftKey ? 'select' : t0 >= PE.from && t0 <= PE.to && PE.to > PE.from ? 'shift' : 'pan';
+    PD = { mode, semi: 0, moved: false }; pcv.setPointerCapture(e.pointerId);
+    if (mode === 'pan') pcv.style.cursor = 'grabbing';
+    const mv = ev => {
+      if (!PD.moved && Math.abs(ev.clientX - sx) < 4 && Math.abs(ev.clientY - sy) < 4) return; PD.moved = true;
+      const r = pcv.getBoundingClientRect();
+      if (mode === 'select') { const t1 = Math.max(0, Math.min(SET.dur, xToT(ev.clientX - r.left))); PE.from = Math.min(t0, t1); PE.to = Math.max(t0, t1); renderPitch(); draw(); }
+      else if (mode === 'shift') { PD.semi = Math.max(-12, Math.min(12, Math.round((sy - ev.clientY) / semiPx()))); drawPE(); }
+      else { const dt = (ev.clientX - sx) / pcv.clientWidth * (v1 - v0); setView(v0 - dt, v1 - dt); }
+    };
+    const up = async () => {
+      pcv.removeEventListener('pointermove', mv); pcv.removeEventListener('pointerup', up); pcv.removeEventListener('pointercancel', up);
+      const d = PD; PD = null; pcv.style.cursor = '';
+      if (!d.moved) { seek(t0); return; }   // クリックだけ → その位置へ
+      if (d.mode === 'shift' && d.semi) { PE.semi = d.semi; renderPitch(); if (await applyPitch()) { PE.semi = 0; renderPitch(); } }
+      drawPE();
+    };
+    pcv.addEventListener('pointermove', mv); pcv.addEventListener('pointerup', up); pcv.addEventListener('pointercancel', up);
+  });
+  pcv.addEventListener('wheel', e => {   // ホイールで拡大・縮小（マウスの位置を中心に）。横スクロールは移動
+    if (!PE || !SET) return; e.preventDefault();
+    const span = PV.v1 - PV.v0;
+    if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) { const dt = e.deltaX / pcv.clientWidth * span; setView(PV.v0 + dt, PV.v1 + dt); return; }
+    const at = xToT(e.offsetX), k = Math.exp(e.deltaY * 0.0015), ns = Math.max(1, Math.min(SET.dur, span * k));
+    setView(at - (at - PV.v0) / span * ns, at - (at - PV.v0) / span * ns + ns);
+  }, { passive: false });
+  $('#mxPitch', root).addEventListener('click', e => {
+    const b = e.target.closest('[data-zoom]'); if (!b || !PE || !SET) return;
+    const z = b.dataset.zoom, span = PV.v1 - PV.v0, c = (PV.v0 + PV.v1) / 2;
+    if (z === 'all') setView(0, SET.dur);
+    else if (z === 'sel') { const pad = Math.max(0.5, (PE.to - PE.from) * 0.15); setView(PE.from - pad, PE.to + pad); }
+    else { const ns = z === 'in' ? span / 2 : span * 2; setView(c - ns / 2, c + ns / 2); }
+  });
+  window.addEventListener('resize', () => drawPE());
+
   /* ---------- 再生 ---------- */
   function play() {
     if (!SET || playing || !master()) return; onPlay && onPlay();
@@ -722,6 +841,7 @@ export function initMixer({ root, toast, onPlay }) {
       }
       c.globalAlpha = 1; c.fillStyle = '#E7E9EF'; if (prog > 0) c.fillRect(Math.min(w - 2, prog * w - 1), 0, 2, h);
     });
+    drawPE();
   }
 
   /* ---------- 操作 ---------- */

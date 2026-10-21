@@ -104,7 +104,7 @@ const SEED = {
 
 /* ---------- 状態 ---------- */
 const UI_KEY = 'futari-studio-ui';
-const UI = Object.assign({ tab: 'lab', sel: 'c07', filter: 'all', wide: { chat: false, memo: false } }, LS.get(UI_KEY, {}));
+const UI = Object.assign({ tab: 'lab', sel: 'c07', filter: 'all', wide: { chat: false, memo: false }, autoRead: false }, LS.get(UI_KEY, {}));
 UI.memoMode = 'local';   // メモ帳はいつも「自分だけのメモ」から始める（共有は確認してから開く）
 const saveUI = () => LS.set(UI_KEY, UI);
 const SH = JSON.parse(JSON.stringify(DEF_SHARED));   // 2人で共有する制作データ
@@ -326,9 +326,10 @@ function setPanel(name, open) {
   panelOpen[name] = open;
   $('#' + name).classList.toggle('open', open);
   $('#' + name + 'Btn').setAttribute('aria-expanded', String(open));
-  if (name === 'chat' && open) { renderChat(); markRead(); setTimeout(() => $('#chatIn').focus(), 260); }
+  if (name === 'chat' && open) { renderChat(); markRead(); updReadBar(); const ul = $('#unreadLine'); if (ul && !UI.autoRead) ul.scrollIntoView({ block: 'center' }); setTimeout(() => $('#chatIn').focus(), 260); }
   if (name === 'memo' && open) { if (UI.memoMode !== 'local') { flushMemo(); UI.memoMode = 'local'; } $('#memoSearch').value = ''; renderMemoList(); renderMemoEditor(true); }
   if (!open) $('#' + name + 'Btn').focus();
+  if (name === 'chat') updReadBar();
 }
 $('#chatBtn').addEventListener('click', () => setPanel('chat', !panelOpen.chat));
 $('#memoBtn').addEventListener('click', () => setPanel('memo', !panelOpen.memo));
@@ -412,10 +413,11 @@ function refInfo(r) {
 }
 const refHtml = (r, id) => { const f = refInfo(r); return `<button type="button" class="ref" data-ref="${esc(id)}"><i style="background:${f.c}"></i><span>${esc(f.l)}</span></button>`; };
 function renderChat() {
-  let last = '', html = '';
+  let last = '', html = '', unreadLine = false;
   if (!CHAT.length) html = '<div class="empty">まだメッセージはありません。最初のひとことを送ってみましょう。</div>';
   CHAT.forEach(m => {
     const d = dayOf(m.at); if (d !== last) { html += `<div class="day">${d}</div>`; last = d; }
+    if (!unreadLine && m.uid !== ME.uid && m.at > READS.mine) { html += '<div class="unread-line" id="unreadLine"><span>ここから未読</span></div>'; unreadLine = true; }
     const mine = m.uid === ME.uid, cls = mine ? 'me' : 'pt', nm = dispName(m.uid, m.name), ini = esc((nm || '?').slice(0, 1));
     const read = mine && READS.others >= m.at ? '<span>既読</span>' : '';
     const long = (m.x || '').length > 400 || (m.x || '').split('\n').length > 10, open = OPEN_MSG.has(m.id);   // 長文は折りたたむ
@@ -436,8 +438,23 @@ function renderChat() {
   if (ta) { ta.value = EDIT_DRAFT; ta.style.height = Math.min(240, Math.max(60, ta.scrollHeight)) + 'px'; if (!renderChat.noFocus) { ta.focus(); ta.setSelectionRange(EDIT_CARET ?? ta.value.length, EDIT_CARET ?? ta.value.length); } }
   updBadge();
 }
-function updBadge() { const un = CHAT.filter(m => m.uid !== ME.uid && m.at > READS.mine).length; $('#badge').hidden = !un; $('#badge').textContent = un > 99 ? '99+' : un; }
-function markRead() { if (!store || !CHAT.length) return; const last = CHAT[CHAT.length - 1]; if (last.at > READS.mine) { READS.mine = last.at; updBadge(); Promise.resolve(store.markRead()).catch(() => {}); } }
+function updBadge() { const un = unreadCount(); $('#badge').hidden = !un; $('#badge').textContent = un > 99 ? '99+' : un; updReadBar(); }
+// 既読：「開いたら自動で既読にする」がオフ（最初の設定）なら、「既読にする」ボタンを押したときだけ既読にする
+function markRead(force) {
+  if (!store || !CHAT.length) return;
+  if (!force && !UI.autoRead) { updBadge(); return; }
+  const last = CHAT[CHAT.length - 1];
+  if (last.at > READS.mine) { READS.mine = last.at; updBadge(); renderChat(); Promise.resolve(store.markRead()).catch(() => {}); }
+}
+const unreadCount = () => CHAT.filter(m => m.uid !== ME.uid && m.at > READS.mine).length;
+function updReadBar() {
+  const un = unreadCount(), bar = $('#readBar');
+  bar.hidden = !un || !panelOpen.chat;
+  $('#readNum').textContent = un;
+}
+$('#readBtn').addEventListener('click', () => { markRead(true); toast('既読にしました'); $('#chatIn').focus(); });
+$('#autoRead').checked = !!UI.autoRead;
+$('#autoRead').addEventListener('change', e => { UI.autoRead = e.target.checked; saveUI(); if (UI.autoRead) markRead(); else updBadge(); });
 function renderPend() { const p = $('#pend'); p.hidden = !pendRef; p.innerHTML = pendRef ? `添付：${refHtml(pendRef, '')}<button type="button" class="rm" aria-label="添付を外す">×</button>` : ''; }
 function openRef(r, msg) {
   if (r.k === 'memo') { openMemoView(r, msg); return; }   // メモの添付は、動かせる小窓で開く（チャットは閉じない）
@@ -519,7 +536,7 @@ $('#chatForm').addEventListener('submit', async e => {
   e.preventDefault(); const v = $('#chatIn').value.trim(); if (!v && !pendRef) return; if (!store) return;
   const msg = { x: v || (pendRef && pendRef.k === 'memo' ? '📝 メモを送ります' : '（位置を共有しました）'), ref: pendRef || null };
   const t = $('#chatIn'); t.value = ''; t.style.height = '44px'; pendRef = null; renderPend();
-  try { await store.sendChat(msg); setTimeout(markRead, 600); notifyByMail(msg.x); }
+  try { await store.sendChat(msg); setTimeout(() => markRead(true), 600); notifyByMail(msg.x); }   // 返信したときは、そこまで読んだことにする
   catch (err) { t.value = msg.x; toast('送信できませんでした。通信状況を確認してください'); }
 });
 
